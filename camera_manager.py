@@ -2,12 +2,12 @@ import cv2
 import numpy as np
 
 class CameraManager:
-    def __init__(self, camera_id=0):
+    def __init__(self, camera_id=0, dictionary=cv2.aruco.DICT_4X4_50):
         self.camera_id = camera_id
         self.cap = None
         self.camera_matrix = None
         self.dist_coeffs = None
-        self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_50)
+        self.aruco_dict = cv2.aruco.getPredefinedDictionary(dictionary)
         self.parameters = cv2.aruco.DetectorParameters()
 
     def connect(self):

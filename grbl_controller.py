@@ -1,5 +1,7 @@
 import time
 import serial
+import re
+
 
 class GRBLController:
     def __init__(self, port='/dev/ttyUSB0', baud=115200, timeout=2):
@@ -41,24 +43,76 @@ class GRBLController:
                 response_lines.append(line)
         return response_lines
 
-    def get_position(self):
+    def get_position(self, axes=None):
+        """
+        Get current machine position for specified axes.
+
+        Args:
+            axes (list or None): List of axis indices to return (0=X, 1=Y, 2=Z, 3=A, 4=B, 5=C)
+                               If None, returns X, Y, Z by default (indices 0, 1, 2)
+
+        Returns:
+            list: Position values for requested axes in the same order as requested
+                 Default: [x, y, z] positions
+
+        Examples:
+            get_position()           # Returns [x, y, z]
+            get_position([0, 1])     # Returns [x, y]
+            get_position([2])        # Returns [z]
+            get_position([0, 1, 2, 3])  # Returns [x, y, z, a] if 4-axis machine
+        """
         if not self.serial_conn:
             raise ValueError("GRBL not connected")
+
+        # Default to X, Y, Z axes (indices 0, 1, 2)
+        if axes is None:
+            axes = [0, 1, 2]
+
+        # Validate axes input
+        if not isinstance(axes, (list, tuple)):
+            raise ValueError("axes must be a list or tuple of axis indices")
+
+        for axis in axes:
+            if not isinstance(axis, int) or axis < 0:
+                raise ValueError("axis indices must be non-negative integers")
 
         self.serial_conn.write(b"?\n")
         time.sleep(0.1)
         response = self.serial_conn.readlines()
 
         for line in response:
-            if b"MPos:" in line:
-                data = line.decode()
+            line_str = line.decode() if isinstance(line, bytes) else str(line)
+
+            # Use regex to find MPos data, ignoring everything after | or >
+            mpos_match = re.search(r'MPos:([-+]?\d*\.?\d+(?:,[-+]?\d*\.?\d+)*)', line_str)
+
+            if mpos_match:
                 try:
-                    mpos = data.split('MPos:')[1].split(' ')[0]
-                    x, y, z = map(float, mpos.split(','))
-                    return [x, y, z]
-                except:
-                    pass
-        raise ValueError("Failed to parse GRBL position")
+                    # Extract the matched position string
+                    mpos_str = mpos_match.group(1)
+
+                    # Split by comma and convert to float, filtering out empty strings
+                    position_values = []
+                    for pos_str in mpos_str.split(','):
+                        pos_str = pos_str.strip()
+                        if pos_str:  # Only process non-empty strings
+                            position_values.append(float(pos_str))
+
+                    # Extract requested axes
+                    result = []
+                    for axis_idx in axes:
+                        if axis_idx < len(position_values):
+                            result.append(position_values[axis_idx])
+                        else:
+                            raise ValueError(
+                                f"Axis {axis_idx} not available (only {len(position_values)} axes reported)")
+
+                    return result
+
+                except (ValueError, IndexError) as e:
+                    raise ValueError(f"Failed to parse GRBL position values: {e}")
+
+        raise ValueError("Failed to get position response from GRBL")
 
     def move_relative(self, x=0, y=0, z=0, feedrate=1000):
         cmd = f"G91 G1 X{x} Y{y} Z{z} F{feedrate}"
