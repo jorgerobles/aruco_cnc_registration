@@ -55,6 +55,7 @@ class CameraDisplay:
             return
 
         frame = self.camera_manager.capture_frame()
+        self.log(f"Camera feed display: {frame.shape}")
         if frame is not None:
             self.current_frame = frame.copy()
 

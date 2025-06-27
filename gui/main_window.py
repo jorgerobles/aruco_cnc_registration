@@ -277,6 +277,7 @@ class RegistrationGUI:
             marker_length = self.calibration_panel.get_marker_length()
             self.camera_display.set_marker_length(marker_length)
             self.camera_display.start_feed()
+            self.log(f"Camera feed started", "started")
 
     def on_closing(self):
         """Handle application closing"""
