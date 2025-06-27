@@ -6,10 +6,9 @@ Main GUI window that combines all panels and manages application state
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 import time
-from typing import Optional
 
-from camera_manager import CameraManager
-from grbl_controller import GRBLController
+from services.camera_manager import CameraManager
+from services.grbl_controller import GRBLController
 from registration.registration_manager import RegistrationManager
 from gui.control_panels import ConnectionPanel, MachineControlPanel, RegistrationPanel, CalibrationPanel
 from gui.camera_display import CameraDisplay

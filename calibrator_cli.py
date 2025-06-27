@@ -5,10 +5,10 @@ import time
 import cv2
 import numpy as np
 from datetime import datetime
-from typing import List, Tuple
-from board_manager import CharucoBoardManager
-from calibration_strategy import StandardCalibration, FisheyeCalibration
-from charuco_calibrator import CharucoCalibrator
+from typing import Tuple
+from calibrator.board_manager import CharucoBoardManager
+from calibrator.calibration_strategy import StandardCalibration, FisheyeCalibration
+from calibrator.charuco_calibrator import CharucoCalibrator
 
 
 

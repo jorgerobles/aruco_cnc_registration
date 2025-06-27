@@ -5,9 +5,98 @@ Test camera connectivity and basic functionality independently
 """
 
 import cv2
-import numpy as np
-import sys
 import time
+
+
+def list_available_cameras():
+    """List all available cameras using cv2_enumerate_cameras if available"""
+    print("=== Available Cameras ===")
+
+    cameras = []
+
+    # Try using cv2_enumerate_cameras if available
+    try:
+        from cv2_enumerate_cameras import enumerate_cameras
+        print("Using cv2_enumerate_cameras for detailed camera info...")
+
+        for camera_info in enumerate_cameras(cv2.CAP_GSTREAMER):
+            cameras.append({
+                'index': camera_info.index,
+                'name': camera_info.name,
+                'backend': 'GStreamer'
+            })
+            print(f'{camera_info.index}: {camera_info.name}')
+
+        # Also try other backends
+        try:
+            for camera_info in enumerate_cameras(cv2.CAP_V4L2):
+                if not any(cam['index'] == camera_info.index for cam in cameras):
+                    cameras.append({
+                        'index': camera_info.index,
+                        'name': camera_info.name,
+                        'backend': 'V4L2'
+                    })
+                    print(f'{camera_info.index}: {camera_info.name} (V4L2)')
+        except:
+            pass
+
+    except ImportError:
+        print("cv2_enumerate_cameras not available, using basic detection...")
+
+        # Fallback to basic detection
+        for camera_id in range(10):  # Check first 10 camera indices
+            cap = cv2.VideoCapture(camera_id)
+            if cap.isOpened():
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    cameras.append({
+                        'index': camera_id,
+                        'name': f'Camera {camera_id}',
+                        'backend': 'Default'
+                    })
+                    print(f'{camera_id}: Camera {camera_id}')
+                cap.release()
+            else:
+                cap.release()
+
+    if not cameras:
+        print("No cameras found!")
+        return None
+
+    return cameras
+
+
+def select_camera_interactive(cameras):
+    """Allow user to select a camera from the list"""
+    if not cameras:
+        return None
+
+    print(f"\nFound {len(cameras)} camera(s)")
+    print("\nSelect a camera to test:")
+
+    for i, camera in enumerate(cameras):
+        print(f"  {i + 1}. Index {camera['index']}: {camera['name']} ({camera['backend']})")
+
+    while True:
+        try:
+            choice = input(f"\nEnter choice (1-{len(cameras)}) or 'q' to quit: ").strip()
+
+            if choice.lower() == 'q':
+                return None
+
+            choice_num = int(choice)
+            if 1 <= choice_num <= len(cameras):
+                selected_camera = cameras[choice_num - 1]
+                print(f"Selected: {selected_camera['name']} (Index {selected_camera['index']})")
+                return selected_camera['index']
+            else:
+                print(f"Please enter a number between 1 and {len(cameras)}")
+
+        except ValueError:
+            print("Please enter a valid number or 'q' to quit")
+        except KeyboardInterrupt:
+            print("\nOperation cancelled")
+            return None
 
 
 def test_camera_basic():
@@ -46,6 +135,43 @@ def test_camera_basic():
 
     print("\n❌ No working cameras found")
     return None
+
+
+def test_specific_camera(camera_id):
+    """Test a specific camera by ID"""
+    print(f"\n=== Testing Camera {camera_id} ===")
+
+    cap = cv2.VideoCapture(camera_id)
+
+    if cap.isOpened():
+        # Try to read a frame
+        ret, frame = cap.read()
+        if ret and frame is not None:
+            height, width = frame.shape[:2]
+            print(f"✓ Camera {camera_id} working - Resolution: {width}x{height}")
+
+            # Test frame stability
+            successful_frames = 0
+            total_frames = 10
+
+            for i in range(total_frames):
+                ret, frame = cap.read()
+                if ret and frame is not None:
+                    successful_frames += 1
+                time.sleep(0.1)  # Small delay between frames
+
+            success_rate = (successful_frames / total_frames) * 100
+            print(f"✓ Frame stability: {successful_frames}/{total_frames} frames ({success_rate:.1f}%)")
+
+            cap.release()
+            return True
+        else:
+            print(f"✗ Camera {camera_id} opened but can't read frames")
+    else:
+        print(f"✗ Camera {camera_id} not available")
+
+    cap.release()
+    return False
 
 
 def test_camera_properties(camera_id):
@@ -121,9 +247,9 @@ def test_camera_capture_loop(camera_id, duration=10):
     return success_rate > 90
 
 
-def test_camera_with_aruco():
+def test_camera_with_aruco(camera_id):
     """Test camera with ArUco marker detection"""
-    print("\n=== ArUco Marker Detection Test ===")
+    print(f"\n=== ArUco Marker Detection Test (Camera {camera_id}) ===")
 
     try:
         # Test if ArUco is available
@@ -131,11 +257,6 @@ def test_camera_with_aruco():
         detector_params = cv2.aruco.DetectorParameters()
         detector = cv2.aruco.ArucoDetector(aruco_dict, detector_params)
         print("✓ ArUco detection available")
-
-        # Find working camera
-        camera_id = test_camera_basic()
-        if camera_id is None:
-            return False
 
         cap = cv2.VideoCapture(camera_id)
         if not cap.isOpened():
@@ -146,6 +267,8 @@ def test_camera_with_aruco():
         print("Show a 6x6 ArUco marker (ID 0-249) to the camera")
 
         start_time = time.time()
+        markers_detected = False
+
         while time.time() - start_time < 30:  # Test for 30 seconds
             ret, frame = cap.read()
             if not ret:
@@ -155,7 +278,9 @@ def test_camera_with_aruco():
             corners, ids, rejected = detector.detectMarkers(frame)
 
             if ids is not None:
-                print(f"✓ Detected {len(ids)} markers: {ids.flatten()}")
+                if not markers_detected:
+                    print(f"✓ Detected {len(ids)} markers: {ids.flatten()}")
+                    markers_detected = True
                 # Draw detected markers
                 cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
@@ -168,6 +293,12 @@ def test_camera_with_aruco():
 
         cap.release()
         cv2.destroyAllWindows()
+
+        if markers_detected:
+            print("✓ ArUco detection working")
+        else:
+            print("⚠️  No ArUco markers detected (try showing a marker to the camera)")
+
         return True
 
     except Exception as e:
@@ -181,7 +312,7 @@ def debug_camera_manager():
 
     try:
         # Try to import your CameraManager
-        from camera_manager import CameraManager
+        from services.camera_manager import CameraManager
 
         camera_manager = CameraManager()
         print("✓ CameraManager imported successfully")
@@ -226,39 +357,54 @@ def main():
     # Basic OpenCV info
     print(f"OpenCV Version: {cv2.__version__}")
 
-    # Test 1: Basic camera connectivity
-    working_camera = test_camera_basic()
+    # Step 1: List available cameras
+    cameras = list_available_cameras()
 
-    if working_camera is not None:
-        # Test 2: Camera properties
-        test_camera_properties(working_camera)
+    if not cameras:
+        print("\n⚠️  No cameras found. Check:")
+        print("   - Camera is connected and powered")
+        print("   - Camera drivers are installed")
+        print("   - Camera is not being used by another application")
+        print("   - Try different USB ports")
+        return
 
-        # Test 3: Capture loop stability
+    # Step 2: Let user select a camera
+    selected_camera_id = select_camera_interactive(cameras)
+
+    if selected_camera_id is None:
+        print("No camera selected. Exiting.")
+        return
+
+    # Step 3: Test the selected camera
+    print(f"\n{'=' * 50}")
+    print(f"Testing Selected Camera {selected_camera_id}")
+    print(f"{'=' * 50}")
+
+    # Test basic functionality
+    if test_specific_camera(selected_camera_id):
+        # Test camera properties
+        test_camera_properties(selected_camera_id)
+
+        # Test capture loop stability
         print(f"\nTesting capture stability...")
-        stable = test_camera_capture_loop(working_camera, 5)
+        stable = test_camera_capture_loop(selected_camera_id, 5)
 
         if stable:
             print("✓ Camera capture is stable")
         else:
             print("❌ Camera capture is unstable")
 
-        # Test 4: ArUco detection
-        test_camera_with_aruco()
+        # Test ArUco detection
+        test_camera_with_aruco(selected_camera_id)
+    else:
+        print(f"❌ Camera {selected_camera_id} failed basic tests")
 
-    # Test 5: Your CameraManager class
+    # Test CameraManager class
     debug_camera_manager()
 
     print("\n" + "=" * 50)
     print("Debug complete. Check the results above to identify issues.")
-
-    if working_camera is not None:
-        print(f"\n💡 Recommendation: Use camera ID {working_camera} in your application")
-    else:
-        print("\n⚠️  No working cameras found. Check:")
-        print("   - Camera is connected and powered")
-        print("   - Camera drivers are installed")
-        print("   - Camera is not being used by another application")
-        print("   - Try different USB ports")
+    print(f"\n💡 Recommendation: Use camera ID {selected_camera_id} in your application")
 
 
 if __name__ == "__main__":
