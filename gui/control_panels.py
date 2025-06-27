@@ -21,7 +21,7 @@ class ConnectionPanel:
         self.frame.pack(fill=tk.X, pady=5, padx=5)
 
         # Variables
-        self.grbl_port_var = tk.StringVar(value="COM3")
+        self.grbl_port_var = tk.StringVar(value="/dev/ttyUSB0")
         self.camera_id_var = tk.StringVar(value="0")
 
         self._setup_widgets()
@@ -334,7 +334,7 @@ class CalibrationPanel:
         self.frame.pack(fill=tk.X, pady=5, padx=5)
 
         # Variables
-        self.marker_length_var = tk.StringVar(value="20.0")
+        self.marker_length_var = tk.StringVar(value="15.0")
 
         self._setup_widgets()
 
