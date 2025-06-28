@@ -4,9 +4,9 @@ Transforms SVG routes to machine coordinates using registration data
 """
 
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 from svg.svg_loader import svg_to_routes
-from registration.registration_manager import RegistrationManager
+from services.registration_manager import RegistrationManager
 
 
 class RouteTransformer:

@@ -1,6 +1,7 @@
 """
 Camera Display Widget
 Handles camera feed display, marker visualization, and routes overlay
+Using @event_aware decorator for clean event handling
 """
 
 import tkinter as tk
@@ -10,11 +11,16 @@ from PIL import Image, ImageTk
 from typing import Optional, Callable, List, Tuple
 import os
 
+from services.event_broker import (event_aware, event_handler,
+                         CameraEvents, EventPriority)
 
+
+@event_aware()
 class CameraDisplay:
     """Widget for displaying camera feed with marker detection overlay and routes"""
 
-    def __init__(self, parent, camera_manager, registration_manager=None, logger: Optional[Callable] = None):
+    def __init__(self, parent, camera_manager, registration_manager=None,
+                 logger: Optional[Callable] = None):
         self.parent = parent
         self.camera_manager = camera_manager
         self.registration_manager = registration_manager
@@ -23,7 +29,7 @@ class CameraDisplay:
         # Display state
         self.camera_running = False
         self.current_frame = None
-        self.marker_length = 15.0
+        self.marker_length = 20.0
 
         # Routes overlay state
         self.routes = []  # List of routes from SVG (in machine coordinates)
@@ -38,10 +44,30 @@ class CameraDisplay:
         self.canvas = tk.Canvas(parent, bg='black')
         self.canvas.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
+        # Event handlers are automatically registered by @event_aware decorator
+
     def log(self, message: str, level: str = "info"):
         """Log message if logger is available"""
         if self.logger:
             self.logger(message, level)
+
+    # Event handlers using decorators
+    @event_handler(CameraEvents.DISCONNECTED, EventPriority.HIGH)
+    def _on_camera_disconnected(self):
+        """Handle camera disconnection"""
+        self.stop_feed()
+        self.log("Camera disconnected - stopping feed", "info")
+
+    @event_handler(CameraEvents.ERROR)
+    def _on_camera_error(self, error_message: str):
+        """Handle camera errors"""
+        self.log(f"Camera error in display: {error_message}", "error")
+
+    @event_handler(CameraEvents.FRAME_CAPTURED)
+    def _on_frame_captured(self, frame: np.ndarray):
+        """Handle new frame from camera (optional use)"""
+        # Could be used for additional processing or overlays
+        pass
 
     def load_routes_from_svg(self, svg_file_path: str, angle_threshold: float = 5.0):
         """
@@ -53,7 +79,7 @@ class CameraDisplay:
         """
         try:
             # Import svg_loader (assuming it's in the same directory or PYTHONPATH)
-            from svg_loader import svg_to_routes
+            from svg.svg_loader import svg_to_routes
 
             if not os.path.exists(svg_file_path):
                 raise FileNotFoundError(f"SVG file not found: {svg_file_path}")
@@ -103,12 +129,40 @@ class CameraDisplay:
 
     def start_feed(self):
         """Start camera feed display"""
+        if not self.camera_manager.is_connected:
+            self.log("Cannot start feed - camera not connected", "error")
+            return
+
         self.camera_running = True
+        self.log("Starting camera feed", "info")
         self._update_feed()
 
     def stop_feed(self):
         """Stop camera feed display"""
         self.camera_running = False
+        self.log("Camera feed stopped", "info")
+
+        # Clear the canvas
+        self.canvas.delete("all")
+        self._show_disconnected_message()
+
+    def _show_disconnected_message(self):
+        """Show disconnected message on canvas"""
+        try:
+            self.canvas.update_idletasks()
+            canvas_width = self.canvas.winfo_width()
+            canvas_height = self.canvas.winfo_height()
+
+            if canvas_width > 1 and canvas_height > 1:
+                self.canvas.create_text(
+                    canvas_width // 2,
+                    canvas_height // 2,
+                    text="Camera Disconnected",
+                    fill="white",
+                    font=("Arial", 16)
+                )
+        except:
+            pass  # Canvas might not be ready
 
     def set_marker_length(self, length: float):
         """Set marker length for pose detection"""
@@ -123,28 +177,49 @@ class CameraDisplay:
         if not self.camera_running:
             return
 
-        frame = self.camera_manager.capture_frame()
-        if frame is not None:
-            self.log(f"Frame captured: {frame.shape}")
-            self.current_frame = frame.copy()
+        if not self.camera_manager.is_connected:
+            self.log("Camera disconnected during feed", "error")
+            self.stop_feed()
+            return
 
-            # Try to detect markers and annotate frame
-            display_frame = self._process_frame(frame)
+        try:
+            frame = self.camera_manager.capture_frame()
+            if frame is not None:
+                self.current_frame = frame.copy()
 
-            # Add routes overlay if enabled
-            if self.show_routes and self.routes:
-                display_frame = self._draw_routes_overlay(display_frame)
+                # Try to detect markers and annotate frame
+                display_frame = self._process_frame(frame)
 
-            # Display the frame
-            self._display_frame(display_frame)
-        else:
-            self.log("No frame captured", "error")
-        # Schedule next update
-        self.parent.after(50, self._update_feed)
+                # Add routes overlay if enabled
+                if self.show_routes and self.routes:
+                    display_frame = self._draw_routes_overlay(display_frame)
+
+                # Display the frame
+                self._display_frame(display_frame)
+            else:
+                # No frame captured - camera might be disconnected
+                if self.camera_running:
+                    self.log("No frame captured - stopping feed", "error")
+                    self.stop_feed()
+                    return
+
+        except Exception as e:
+            self.log(f"Error in feed update: {e}", "error")
+
+        # Schedule next update if still running
+        if self.camera_running:
+            self.parent.after(50, self._update_feed)
 
     def _process_frame(self, frame: np.ndarray) -> np.ndarray:
         """Process frame with marker detection and annotation"""
         try:
+            # Skip marker detection if camera not calibrated
+            if (self.camera_manager.camera_matrix is None or
+                self.camera_manager.dist_coeffs is None):
+                cv2.putText(frame, "Camera not calibrated", (10, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
+                return frame
+
             rvec, tvec, norm_pos, annotated_frame = self.camera_manager.detect_marker_pose(
                 frame, self.marker_length)
 
@@ -160,6 +235,11 @@ class CameraDisplay:
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                 return frame
 
+        except ValueError as e:
+            # Camera not calibrated
+            cv2.putText(frame, str(e), (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+            return frame
         except Exception as e:
             self.log(f"Marker detection error: {e}", "error")
             cv2.putText(frame, "Detection error", (10, 30),
@@ -235,6 +315,7 @@ class CameraDisplay:
         pixel_y = int(frame_height/2 - camera_3d[1] * pixels_per_unit)  # Y-axis inverted
 
         return (pixel_x, pixel_y)
+
     def _draw_routes_overlay(self, frame: np.ndarray) -> np.ndarray:
         """
         Draw routes overlay on the frame using registration-based coordinate transformation
@@ -322,33 +403,41 @@ class CameraDisplay:
 
     def _display_frame(self, frame: np.ndarray):
         """Display frame on canvas with proper scaling"""
-        # Convert BGR to RGB
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(rgb_frame)
+        try:
+            # Convert BGR to RGB
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(rgb_frame)
 
-        # Get canvas dimensions
-        canvas_width = self.canvas.winfo_width()
-        canvas_height = self.canvas.winfo_height()
+            # Ensure canvas is ready
+            self.canvas.update_idletasks()
+            canvas_width = self.canvas.winfo_width()
+            canvas_height = self.canvas.winfo_height()
 
-        if canvas_width > 1 and canvas_height > 1:
+            # Use default size if canvas not ready
+            if canvas_width <= 1 or canvas_height <= 1:
+                canvas_width, canvas_height = 640, 480
+
             # Scale image to fit canvas while maintaining aspect ratio
             pil_image = self._scale_image(pil_image, canvas_width, canvas_height)
 
-        # Convert to PhotoImage and display
-        photo = ImageTk.PhotoImage(pil_image)
-        self.canvas.delete("all")
+            # Convert to PhotoImage and display
+            photo = ImageTk.PhotoImage(pil_image)
+            self.canvas.delete("all")
 
-        # Center the image on the canvas
-        x_offset = (canvas_width - pil_image.width) // 2
-        y_offset = (canvas_height - pil_image.height) // 2
-        self.canvas.create_image(
-            x_offset + pil_image.width // 2,
-            y_offset + pil_image.height // 2,
-            image=photo
-        )
+            # Center the image on the canvas
+            x_offset = (canvas_width - pil_image.width) // 2
+            y_offset = (canvas_height - pil_image.height) // 2
+            self.canvas.create_image(
+                x_offset + pil_image.width // 2,
+                y_offset + pil_image.height // 2,
+                image=photo
+            )
 
-        # Keep a reference to prevent garbage collection
-        self.canvas.image = photo
+            # Keep a reference to prevent garbage collection
+            self.canvas.image = photo
+
+        except Exception as e:
+            self.log(f"Error displaying frame: {e}", "error")
 
     def _scale_image(self, image: Image.Image, canvas_width: int, canvas_height: int) -> Image.Image:
         """Scale image to fit canvas while maintaining aspect ratio"""

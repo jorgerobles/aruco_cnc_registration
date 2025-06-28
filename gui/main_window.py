@@ -1,19 +1,24 @@
 """
 Main Window
 Main GUI window that combines all panels and manages application state
+Using @event_aware decorator for clean event handling
 """
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 import time
+from typing import Optional
 
 from services.camera_manager import CameraManager
 from services.grbl_controller import GRBLController
-from registration.registration_manager import RegistrationManager
+from services.registration_manager import RegistrationManager
 from gui.control_panels import ConnectionPanel, MachineControlPanel, RegistrationPanel, CalibrationPanel
 from gui.camera_display import CameraDisplay
+from services.event_broker import (event_aware, event_handler, EventBroker,
+                         CameraEvents, GRBLEvents, RegistrationEvents, ApplicationEvents, EventPriority)
 
 
+@event_aware()
 class RegistrationGUI:
     """Main GUI window for GRBL Camera Registration application"""
 
@@ -22,13 +27,16 @@ class RegistrationGUI:
         self.root.title("GRBL Camera Registration")
         self.root.geometry("1400x900")
 
-        # Controllers and managers
+        # Set up event broker logging (using the decorator's broker)
+        self.setup_event_logging()
+
+        # Controllers and managers - no need to pass event_broker!
         self.grbl_controller = GRBLController()
         self.camera_manager = CameraManager()
         self.registration_manager = RegistrationManager()
 
         # GUI state
-        self.debug_enabled = False
+        self.debug_enabled = True
 
         # GUI components
         self.debug_text = None
@@ -40,6 +48,127 @@ class RegistrationGUI:
         self.calibration_panel = None
 
         self.setup_gui()
+
+        # Emit startup event
+        self.emit(ApplicationEvents.STARTUP)
+
+    def setup_event_logging(self):
+        """Set up event broker logging using the injected broker"""
+        # Get the default broker and configure it
+        broker = EventBroker.get_default()
+        broker._enable_logging = True
+        broker.set_logger(self._event_log)
+
+    def _event_log(self, message: str, level: str = "info"):
+        """Logger for event broker"""
+        self.log(message, level)
+
+    # Event handlers using decorators - automatically registered!
+    @event_handler(CameraEvents.CONNECTED, EventPriority.HIGH)
+    def _on_camera_connected(self, success: bool):
+        """Handle camera connection event"""
+        if success:
+            self.log("Camera connected successfully", "info")
+            self.status_var.set("Camera connected")
+
+            # Start camera feed automatically
+            self.start_camera_feed()
+
+            # Enable camera-dependent controls
+            if hasattr(self, 'calibration_panel'):
+                self.calibration_panel.on_camera_connected()
+            if hasattr(self, 'registration_panel'):
+                self.registration_panel.on_camera_connected()
+
+        else:
+            self.log("Camera connection failed", "error")
+            self.status_var.set("Camera connection failed")
+
+            # Disable camera-dependent controls
+            if hasattr(self, 'calibration_panel'):
+                self.calibration_panel.on_camera_disconnected()
+            if hasattr(self, 'registration_panel'):
+                self.registration_panel.on_camera_disconnected()
+
+    @event_handler(CameraEvents.DISCONNECTED, EventPriority.HIGH)
+    def _on_camera_disconnected(self):
+        """Handle camera disconnection event"""
+        self.log("Camera disconnected", "info")
+        self.status_var.set("Camera disconnected")
+
+        # Stop camera feed
+        if self.camera_display:
+            self.camera_display.stop_feed()
+
+        # Disable camera-dependent controls
+        if hasattr(self, 'calibration_panel'):
+            self.calibration_panel.on_camera_disconnected()
+        if hasattr(self, 'registration_panel'):
+            self.registration_panel.on_camera_disconnected()
+
+    @event_handler(CameraEvents.ERROR)
+    def _on_camera_error(self, error_message: str):
+        """Handle camera error event"""
+        self.log(f"Camera error: {error_message}", "error")
+
+    @event_handler(CameraEvents.CALIBRATION_LOADED)
+    def _on_camera_calibrated(self, file_path: str):
+        """Handle camera calibration loaded event"""
+        self.log(f"Camera calibration loaded: {file_path}", "info")
+        self.status_var.set("Camera calibrated")
+
+    @event_handler(GRBLEvents.CONNECTED, EventPriority.HIGH)
+    def _on_grbl_connected(self, success: bool):
+        """Handle GRBL connection event"""
+        if success:
+            self.log("GRBL connected successfully", "info")
+            self.status_var.set("GRBL connected")
+        else:
+            self.log("GRBL connection failed", "error")
+            self.status_var.set("GRBL connection failed")
+
+    @event_handler(GRBLEvents.DISCONNECTED)
+    def _on_grbl_disconnected(self):
+        """Handle GRBL disconnection event"""
+        self.log("GRBL disconnected", "info")
+        self.status_var.set("GRBL disconnected")
+
+    @event_handler(GRBLEvents.ERROR)
+    def _on_grbl_error(self, error_message: str):
+        """Handle GRBL error event"""
+        self.log(f"GRBL error: {error_message}", "error")
+
+    @event_handler(RegistrationEvents.POINT_ADDED, EventPriority.HIGH)
+    def _on_registration_point_added(self, point_data: dict):
+        """Handle new calibration point added"""
+        point_index = point_data['point_index']
+        total_points = point_data['total_points']
+        machine_pos = point_data['machine_pos']
+
+        self.log(f"Calibration point {point_index + 1} added at X{machine_pos[0]:.3f} Y{machine_pos[1]:.3f} Z{machine_pos[2]:.3f}")
+        self.status_var.set(f"Calibration points: {total_points}")
+
+        # Update registration panel display
+        if hasattr(self, 'registration_panel'):
+            self.registration_panel.update_point_list()
+
+    @event_handler(RegistrationEvents.COMPUTED, EventPriority.HIGH)
+    def _on_registration_computed(self, computation_data: dict):
+        """Handle successful registration computation"""
+        point_count = computation_data['point_count']
+        error = computation_data['error']
+
+        self.log(f"Registration computed successfully with {point_count} points. RMS error: {error:.4f}")
+        self.status_var.set(f"Registration complete - Error: {error:.4f}")
+
+        # Update UI to show registration is ready
+        if hasattr(self, 'registration_panel'):
+            self.registration_panel.on_registration_computed(error)
+
+    @event_handler(RegistrationEvents.ERROR, EventPriority.HIGH)
+    def _on_registration_error(self, error_message: str):
+        """Handle registration errors"""
+        self.log(f"Registration error: {error_message}", "error")
 
     def setup_gui(self):
         """Setup the main GUI layout"""
@@ -90,7 +219,7 @@ class RegistrationGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Create control panels
+        # Create control panels - no need to pass event_broker!
         self.connection_panel = ConnectionPanel(
             scrollable_frame, self.grbl_controller, self.camera_manager, self.log
         )
@@ -135,9 +264,28 @@ class RegistrationGUI:
         cmd_entry.bind('<Return>', self.send_manual_command)
         ttk.Button(debug_ctrl_frame, text="Send Command", command=self.send_manual_command).pack(pady=2)
 
+        # Camera status display
+        camera_status_frame = ttk.LabelFrame(debug_ctrl_frame, text="Camera Status")
+        camera_status_frame.pack(fill=tk.X, pady=5)
+
+        self.camera_status_var = tk.StringVar(value="Disconnected")
+        ttk.Label(camera_status_frame, textvariable=self.camera_status_var).pack()
+
+        ttk.Button(camera_status_frame, text="Refresh Camera Info",
+                  command=self.update_camera_status).pack(pady=2)
+
+        # Event broker status
+        event_status_frame = ttk.LabelFrame(debug_ctrl_frame, text="Event System")
+        event_status_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(event_status_frame, text="Show Event Stats",
+                  command=self.show_event_stats).pack(pady=2)
+
     def setup_display_panel(self, parent):
         """Setup camera display panel"""
-        self.camera_display = CameraDisplay(parent, self.camera_manager, self.log)
+        self.camera_display = CameraDisplay(
+            parent, self.camera_manager, self.registration_manager, self.log
+        )
 
     def setup_debug_panel(self, parent):
         """Setup debug console panel"""
@@ -153,7 +301,7 @@ class RegistrationGUI:
 
     def log(self, message: str, level: str = "info"):
         """Log message to debug console"""
-        if self.debug_enabled:
+        if self.debug_enabled and self.debug_text:
             timestamp = time.strftime("%H:%M:%S")
             tag_map = {
                 "info": "info",
@@ -176,6 +324,34 @@ class RegistrationGUI:
     def clear_debug(self):
         """Clear debug console"""
         self.debug_text.delete(1.0, tk.END)
+
+    def update_camera_status(self):
+        """Update camera status display"""
+        info = self.camera_manager.get_camera_info()
+        if info['connected']:
+            status = f"Connected (ID: {info['camera_id']}, {info['width']}x{info['height']}"
+            if info['calibrated']:
+                status += ", Calibrated"
+            status += ")"
+        else:
+            status = f"Disconnected (ID: {info['camera_id']})"
+
+        self.camera_status_var.set(status)
+
+    def show_event_stats(self):
+        """Show event broker statistics"""
+        event_types = self._event_broker.list_event_types()
+        stats = []
+        for event_type in event_types:
+            count = self._event_broker.get_subscriber_count(event_type)
+            stats.append(f"{event_type}: {count} subscribers")
+
+        if stats:
+            self.log("Event Statistics:")
+            for stat in stats:
+                self.log(f"  {stat}")
+        else:
+            self.log("No active event subscriptions")
 
     def send_manual_command(self, event=None):
         """Send manual GRBL command"""
@@ -271,18 +447,39 @@ class RegistrationGUI:
 
     def start_camera_feed(self):
         """Start camera feed after connection"""
-        if self.camera_display:
+        if self.camera_display and self.camera_manager.is_connected:
             # Update marker length from calibration panel
-            marker_length = self.calibration_panel.get_marker_length()
-            self.camera_display.set_marker_length(marker_length)
+            if hasattr(self.calibration_panel, 'get_marker_length'):
+                marker_length = self.calibration_panel.get_marker_length()
+                self.camera_display.set_marker_length(marker_length)
+
             self.camera_display.start_feed()
-            self.log(f"Camera feed started", "started")
+            self.log("Camera feed started", "info")
+            self.update_camera_status()
+        else:
+            self.log("Cannot start camera feed - camera not connected", "error")
+
+    def stop_camera_feed(self):
+        """Stop camera feed"""
+        if self.camera_display:
+            self.camera_display.stop_feed()
+            self.log("Camera feed stopped", "info")
 
     def on_closing(self):
         """Handle application closing"""
-        if self.camera_display:
-            self.camera_display.stop_feed()
+        self.log("Application closing", "info")
+
+        # Emit shutdown event
+        self.emit(ApplicationEvents.SHUTDOWN)
+
+        # Stop camera feed
+        self.stop_camera_feed()
+
+        # Clean up event subscriptions
+        self.cleanup_subscriptions()
+
+        # Disconnect from devices
         self.camera_manager.disconnect()
         self.grbl_controller.disconnect()
-        self.log("Application closing")
+
         self.root.destroy()
