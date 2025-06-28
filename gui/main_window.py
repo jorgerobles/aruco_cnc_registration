@@ -1,7 +1,6 @@
 """
-Main Window
-Main GUI window that combines all panels and manages application state
-Using @event_aware decorator for clean event handling
+Main Window (Fixed)
+Main GUI window that uses the new overlay architecture
 """
 
 import tkinter as tk
@@ -14,6 +13,8 @@ from services.grbl_controller import GRBLController
 from services.registration_manager import RegistrationManager
 from gui.control_panels import ConnectionPanel, MachineControlPanel, RegistrationPanel, CalibrationPanel
 from gui.camera_display import CameraDisplay
+from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
+from services.overlays.svg_routes_overlay import SVGRoutesOverlay
 from services.event_broker import (event_aware, event_handler, EventBroker,
                          CameraEvents, GRBLEvents, RegistrationEvents, ApplicationEvents, EventPriority)
 
@@ -30,7 +31,7 @@ class RegistrationGUI:
         # Set up event broker logging (using the decorator's broker)
         self.setup_event_logging()
 
-        # Controllers and managers - no need to pass event_broker!
+        # Controllers and managers
         self.grbl_controller = GRBLController()
         self.camera_manager = CameraManager()
         self.registration_manager = RegistrationManager()
@@ -42,6 +43,8 @@ class RegistrationGUI:
         self.debug_text = None
         self.status_var = None
         self.camera_display = None
+        self.marker_overlay = None
+        self.routes_overlay = None
         self.connection_panel = None
         self.machine_panel = None
         self.registration_panel = None
@@ -219,7 +222,7 @@ class RegistrationGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Create control panels - no need to pass event_broker!
+        # Create control panels
         self.connection_panel = ConnectionPanel(
             scrollable_frame, self.grbl_controller, self.camera_manager, self.log
         )
@@ -282,10 +285,27 @@ class RegistrationGUI:
                   command=self.show_event_stats).pack(pady=2)
 
     def setup_display_panel(self, parent):
-        """Setup camera display panel"""
+        """Setup camera display panel with overlays"""
+        # Create camera display without overlays
         self.camera_display = CameraDisplay(
-            parent, self.camera_manager, self.registration_manager, self.log
+            parent, self.camera_manager, logger=self.log
         )
+
+        # Create and inject marker detection overlay
+        self.marker_overlay = MarkerDetectionOverlay(
+            self.camera_manager, marker_length=20.0, logger=self.log
+        )
+        self.camera_display.inject_overlay("markers", self.marker_overlay)
+
+        # Create and inject routes overlay
+        self.routes_overlay = SVGRoutesOverlay(
+            registration_manager=self.registration_manager, logger=self.log
+        )
+        self.camera_display.inject_overlay("routes", self.routes_overlay)
+
+        # Configure overlays
+        self.marker_overlay.set_visibility(True)
+        self.routes_overlay.set_visibility(False)  # Hidden by default
 
     def setup_debug_panel(self, parent):
         """Setup debug console panel"""
@@ -375,8 +395,8 @@ class RegistrationGUI:
             machine_pos = self.grbl_controller.get_position()
             self.log(f"Machine position: X{machine_pos[0]:.3f} Y{machine_pos[1]:.3f} Z{machine_pos[2]:.3f}")
 
-            # Get marker position from camera
-            rvec, tvec, norm_pos = self.camera_display.capture_marker_pose()
+            # Get marker position from marker overlay
+            rvec, tvec, norm_pos = self.marker_overlay.get_current_pose()
 
             if tvec is None:
                 self.log("No marker detected in current frame", "error")
@@ -402,8 +422,8 @@ class RegistrationGUI:
                 self.log("Registration not computed", "error")
                 return
 
-            # Get current marker pose
-            rvec, tvec, norm_pos = self.camera_display.capture_marker_pose()
+            # Get current marker pose from marker overlay
+            rvec, tvec, norm_pos = self.marker_overlay.get_current_pose()
 
             if tvec is None:
                 self.log("No marker detected", "error")
@@ -424,8 +444,8 @@ class RegistrationGUI:
                 self.log("Registration not computed", "error")
                 return
 
-            # Get current marker pose
-            rvec, tvec, norm_pos = self.camera_display.capture_marker_pose()
+            # Get current marker pose from marker overlay
+            rvec, tvec, norm_pos = self.marker_overlay.get_current_pose()
 
             if tvec is None:
                 self.log("No marker detected", "error")
@@ -451,7 +471,7 @@ class RegistrationGUI:
             # Update marker length from calibration panel
             if hasattr(self.calibration_panel, 'get_marker_length'):
                 marker_length = self.calibration_panel.get_marker_length()
-                self.camera_display.set_marker_length(marker_length)
+                self.marker_overlay.set_marker_length(marker_length)
 
             self.camera_display.start_feed()
             self.log("Camera feed started", "info")

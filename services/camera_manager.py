@@ -1,3 +1,9 @@
+"""
+Camera Manager (Cleaned)
+Handles camera connection, frame capture, and calibration
+Marker detection moved to MarkerDetectionOverlay
+"""
+
 import cv2
 import numpy as np
 from services.event_broker import event_aware, CameraEvents
@@ -5,13 +11,11 @@ from services.event_broker import event_aware, CameraEvents
 
 @event_aware()
 class CameraManager:
-    def __init__(self, camera_id=0, dictionary=cv2.aruco.DICT_4X4_50):
+    def __init__(self, camera_id=0):
         self.camera_id = camera_id
         self.cap = None
         self.camera_matrix = None
         self.dist_coeffs = None
-        self.aruco_dict = cv2.aruco.getPredefinedDictionary(dictionary)
-        self.parameters = cv2.aruco.DetectorParameters()
 
         # Connection state
         self._is_connected = False
@@ -100,37 +104,6 @@ class CameraManager:
             self.emit(CameraEvents.ERROR, error_msg)
             return False
 
-    def detect_marker_pose(self, image, marker_length):
-        """Detect ArUco marker pose in image"""
-        if self.camera_matrix is None or self.dist_coeffs is None:
-            raise ValueError("Camera not calibrated")
-
-        try:
-            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            corners, ids, _ = cv2.aruco.detectMarkers(gray, self.aruco_dict, parameters=self.parameters)
-
-            if ids is not None and len(ids) > 0:
-                rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-                    corners, marker_length, self.camera_matrix, self.dist_coeffs)
-
-                # Draw markers for visualization
-                cv2.aruco.drawDetectedMarkers(image, corners, ids)
-                cv2.drawFrameAxes(image, self.camera_matrix, self.dist_coeffs,
-                                  rvecs[0], tvecs[0], marker_length * 0.5)
-
-                center = np.mean(corners[0][0], axis=0)
-                h, w = image.shape[:2]
-                norm_pos = (center[0] / w, center[1] / h)
-
-                return rvecs[0][0], tvecs[0][0], norm_pos, image
-            else:
-                return None, None, None, image
-
-        except Exception as e:
-            error_msg = f"Error in marker detection: {e}"
-            self.emit(CameraEvents.ERROR, error_msg)
-            raise
-
     def set_camera_id(self, camera_id: int):
         """Change camera ID (requires reconnection)"""
         was_connected = self.is_connected
@@ -163,3 +136,26 @@ class CameraManager:
                 self.emit(CameraEvents.ERROR, f"Error getting camera info: {e}")
 
         return info
+
+    def is_calibrated(self) -> bool:
+        """Check if camera calibration is loaded"""
+        return self.camera_matrix is not None and self.dist_coeffs is not None
+
+    def get_calibration(self) -> tuple:
+        """Get camera calibration matrices"""
+        return self.camera_matrix, self.dist_coeffs
+
+    def save_calibration(self, file_path):
+        """Save current calibration data"""
+        if not self.is_calibrated():
+            raise ValueError("No calibration data to save")
+
+        try:
+            np.savez(file_path,
+                     camera_matrix=self.camera_matrix,
+                     dist_coeffs=self.dist_coeffs)
+            return True
+        except Exception as e:
+            error_msg = f"Failed to save calibration: {e}"
+            self.emit(CameraEvents.ERROR, error_msg)
+            return False
