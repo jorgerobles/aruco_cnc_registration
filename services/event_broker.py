@@ -60,8 +60,9 @@ class EventBroker:
 
     def _log(self, message: str, level: str = "info"):
         """Internal logging"""
-        if self._enable_logging and self._logger:
-            self._logger(f"EventBroker[{self.name}]: {message}", level)
+        return
+        # if self._enable_logging and self._logger:
+        #     self._logger(f"EventBroker[{self.name}]: {message}", level)
 
     def subscribe(self, event_type: str, callback: Callable,
                   priority: EventPriority = EventPriority.NORMAL,

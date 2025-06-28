@@ -320,11 +320,24 @@ class RegistrationManager:
                 self.emit(RegistrationEvents.ERROR, error_msg)
                 raise ValueError(error_msg)
 
+            # Convert calibration points to a format that can be saved
+            machine_positions = []
+            camera_positions = []
+            norm_positions = []
+
+            for machine_pos, camera_tvec, norm_pos in self.calibration_points:
+                machine_positions.append(self._ensure_3d(machine_pos))
+                camera_positions.append(self._ensure_3d(camera_tvec))
+                norm_positions.append(norm_pos)
+
             save_data = {
                 'rotation_matrix': self.transformation_matrix,
                 'translation_vector': self.translation_vector,
-                'calibration_points': self.calibration_points,
-                'registration_error': self._registration_error
+                'machine_positions': np.array(machine_positions),  # Convert to consistent array
+                'camera_positions': np.array(camera_positions),    # Convert to consistent array
+                'norm_positions': np.array(norm_positions),        # Convert to consistent array
+                'registration_error': self._registration_error,
+                'point_count': len(self.calibration_points)
             }
 
             np.savez(filename, **save_data)
@@ -335,10 +348,13 @@ class RegistrationManager:
                 'error': self._registration_error
             })
 
+            self.emit(RegistrationEvents.ERROR, f"✅ Registration saved to {filename}")
+
         except Exception as e:
             error_msg = f"Failed to save registration: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
-            raise RuntimeError(error_msg)
+            # Don't re-raise to prevent cascade failures
+            return False
 
     def load_registration(self, filename: str):
         """Load registration data from file"""
@@ -347,7 +363,24 @@ class RegistrationManager:
 
             self.transformation_matrix = data["rotation_matrix"]
             self.translation_vector = data["translation_vector"]
-            self.calibration_points = data["calibration_points"].tolist()
+
+            # Handle both old and new save formats
+            if "calibration_points" in data:
+                # Old format - directly saved calibration_points
+                self.calibration_points = data["calibration_points"].tolist()
+            else:
+                # New format - separate arrays
+                machine_positions = data["machine_positions"]
+                camera_positions = data["camera_positions"]
+                norm_positions = data["norm_positions"]
+
+                # Reconstruct calibration points
+                self.calibration_points = []
+                for i in range(len(machine_positions)):
+                    machine_pos = machine_positions[i]
+                    camera_pos = camera_positions[i]
+                    norm_pos = norm_positions[i]
+                    self.calibration_points.append((machine_pos, camera_pos, norm_pos))
 
             # Load error if available (backwards compatibility)
             self._registration_error = data.get("registration_error", None)
@@ -360,10 +393,13 @@ class RegistrationManager:
                 'error': self._registration_error
             })
 
+            self.emit(RegistrationEvents.ERROR, f"✅ Registration loaded from {filename}")
+
         except Exception as e:
             error_msg = f"Failed to load registration: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
-            raise RuntimeError(error_msg)
+            # Don't re-raise to prevent cascade failures
+            return False
 
     def get_registration_error(self) -> Optional[float]:
         """
@@ -482,6 +518,81 @@ class RegistrationManager:
         except Exception as e:
             error_msg = f"Failed to reset registration: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
+
+    def save_registration_json(self, filename: str):
+        """Save registration data to JSON file (human-readable backup)"""
+        try:
+            import json
+
+            if not self.is_registered():
+                error_msg = "No registration data to save"
+                self.emit(RegistrationEvents.ERROR, error_msg)
+                return False
+
+            # Convert numpy arrays to lists for JSON serialization
+            save_data = {
+                'rotation_matrix': self.transformation_matrix.tolist(),
+                'translation_vector': self.translation_vector.tolist(),
+                'registration_error': float(self._registration_error) if self._registration_error else None,
+                'point_count': len(self.calibration_points),
+                'calibration_points': []
+            }
+
+            # Convert calibration points to JSON-serializable format
+            for i, (machine_pos, camera_tvec, norm_pos) in enumerate(self.calibration_points):
+                point_data = {
+                    'index': i,
+                    'machine_position': self._ensure_3d(machine_pos).tolist(),
+                    'camera_position': self._ensure_3d(camera_tvec).tolist(),
+                    'normalized_position': norm_pos if isinstance(norm_pos, (list, tuple)) else float(norm_pos)
+                }
+                save_data['calibration_points'].append(point_data)
+
+            # Save to JSON file
+            with open(filename, 'w') as f:
+                json.dump(save_data, f, indent=2)
+
+            self.emit(RegistrationEvents.ERROR, f"✅ Registration saved to JSON: {filename}")
+            return True
+
+        except Exception as e:
+            error_msg = f"Failed to save registration to JSON: {e}"
+            self.emit(RegistrationEvents.ERROR, error_msg)
+            return False
+
+    def load_registration_json(self, filename: str):
+        """Load registration data from JSON file"""
+        try:
+            import json
+
+            with open(filename, 'r') as f:
+                data = json.load(f)
+
+            self.transformation_matrix = np.array(data["rotation_matrix"])
+            self.translation_vector = np.array(data["translation_vector"])
+            self._registration_error = data.get("registration_error")
+
+            # Reconstruct calibration points
+            self.calibration_points = []
+            for point_data in data["calibration_points"]:
+                machine_pos = np.array(point_data["machine_position"])
+                camera_pos = np.array(point_data["camera_position"])
+                norm_pos = point_data["normalized_position"]
+                self.calibration_points.append((machine_pos, camera_pos, norm_pos))
+
+            self.emit(RegistrationEvents.LOADED, {
+                'filename': filename,
+                'point_count': len(self.calibration_points),
+                'error': self._registration_error
+            })
+
+            self.emit(RegistrationEvents.ERROR, f"✅ Registration loaded from JSON: {filename}")
+            return True
+
+        except Exception as e:
+            error_msg = f"Failed to load registration from JSON: {e}"
+            self.emit(RegistrationEvents.ERROR, error_msg)
+            return False
 
     def debug_calibration_points(self):
         """Debug method to print calibration point information"""
