@@ -3,20 +3,23 @@ Main Window (Fixed)
 Main GUI window that uses the new overlay architecture
 """
 
-import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
 import time
-from typing import Optional
+import tkinter as tk
+from tkinter import ttk, scrolledtext
 
-from services.camera_manager import CameraManager
-from services.grbl_controller import GRBLController
-from services.registration_manager import RegistrationManager
-from gui.control_panels import ConnectionPanel, MachineControlPanel, RegistrationPanel, CalibrationPanel, SVGRoutesPanel
+from gui.panel_connection import ConnectionPanel
+from gui.panel_calibration import CalibrationPanel
+from gui.panel_machine import MachineControlPanel
+from gui.panel_registration import RegistrationPanel
+from gui.panel_svg import SVGRoutesPanel
 from gui.camera_display import CameraDisplay
+from services.camera_manager import CameraManager
+from services.event_broker import (event_aware, event_handler, EventBroker,
+                                   CameraEvents, GRBLEvents, RegistrationEvents, ApplicationEvents, EventPriority)
+from services.grbl_controller import GRBLController
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
 from services.overlays.svg_routes_overlay import SVGRoutesOverlay
-from services.event_broker import (event_aware, event_handler, EventBroker,
-                         CameraEvents, GRBLEvents, RegistrationEvents, ApplicationEvents, EventPriority)
+from services.registration_manager import RegistrationManager
 
 
 @event_aware()
@@ -149,7 +152,8 @@ class RegistrationGUI:
         total_points = point_data['total_points']
         machine_pos = point_data['machine_pos']
 
-        self.log(f"Calibration point {point_index + 1} added at X{machine_pos[0]:.3f} Y{machine_pos[1]:.3f} Z{machine_pos[2]:.3f}")
+        self.log(
+            f"Calibration point {point_index + 1} added at X{machine_pos[0]:.3f} Y{machine_pos[1]:.3f} Z{machine_pos[2]:.3f}")
         self.status_var.set(f"Calibration points: {total_points}")
 
         # Update registration panel display
@@ -278,14 +282,14 @@ class RegistrationGUI:
         ttk.Label(camera_status_frame, textvariable=self.camera_status_var).pack()
 
         ttk.Button(camera_status_frame, text="Refresh Camera Info",
-                  command=self.update_camera_status).pack(pady=2)
+                   command=self.update_camera_status).pack(pady=2)
 
         # Event broker status
         event_status_frame = ttk.LabelFrame(debug_ctrl_frame, text="Event System")
         event_status_frame.pack(fill=tk.X, pady=5)
 
         ttk.Button(event_status_frame, text="Show Event Stats",
-                  command=self.show_event_stats).pack(pady=2)
+                   command=self.show_event_stats).pack(pady=2)
 
     def setup_display_panel(self, parent):
         """Setup camera display panel with overlays"""
@@ -442,7 +446,8 @@ class RegistrationGUI:
             # Transform to machine coordinates
             machine_point = self.registration_manager.transform_point(tvec.flatten())
 
-            self.log(f"Position test - Camera: {tvec.flatten()}, Predicted machine: X{machine_point[0]:.3f} Y{machine_point[1]:.3f} Z{machine_point[2]:.3f}")
+            self.log(
+                f"Position test - Camera: {tvec.flatten()}, Predicted machine: X{machine_point[0]:.3f} Y{machine_point[1]:.3f} Z{machine_point[2]:.3f}")
 
         except Exception as e:
             self.log(f"Position test failed: {e}", "error")
