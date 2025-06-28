@@ -173,7 +173,7 @@ def example_usage():
 
     # Transform SVG routes
     try:
-        svg_file = "data/test_registro.svg"  # Replace with your SVG file
+        svg_file = "../data/test_registro.svg"  # Replace with your SVG file
         transformed_routes = transformer.load_and_transform_svg(svg_file)
 
         print(f"Loaded {len(transformed_routes)} routes")
