@@ -1,6 +1,6 @@
 """
-Registration Manager
-Handles camera-to-machine coordinate transformation logic
+Fixed Registration Manager
+Handles camera-to-machine coordinate transformation logic with dimension fixes
 Enhanced with @event_aware decorator
 """
 
@@ -24,7 +24,11 @@ class RegistrationManager:
     def add_calibration_point(self, machine_pos: np.ndarray, camera_tvec: np.ndarray, norm_pos: np.ndarray):
         """Add a calibration point to the registration dataset"""
         try:
-            point_data = (machine_pos.copy(), camera_tvec.flatten().copy(), norm_pos)
+            # Ensure consistent dimensions - use only first 3 dimensions
+            machine_pos_3d = self._ensure_3d(machine_pos)
+            camera_tvec_3d = self._ensure_3d(camera_tvec.flatten())
+
+            point_data = (machine_pos_3d.copy(), camera_tvec_3d.copy(), norm_pos)
             self.calibration_points.append(point_data)
 
             point_count = len(self.calibration_points)
@@ -33,8 +37,8 @@ class RegistrationManager:
             self.emit(RegistrationEvents.POINT_ADDED, {
                 'point_index': point_count - 1,
                 'total_points': point_count,
-                'machine_pos': machine_pos.copy(),
-                'camera_tvec': camera_tvec.flatten().copy(),
+                'machine_pos': machine_pos_3d.copy(),
+                'camera_tvec': camera_tvec_3d.copy(),
                 'norm_pos': norm_pos
             })
 
@@ -54,6 +58,19 @@ class RegistrationManager:
             error_msg = f"Failed to add calibration point: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
             raise RuntimeError(error_msg)
+
+    def _ensure_3d(self, point: np.ndarray) -> np.ndarray:
+        """Ensure point is exactly 3D"""
+        point = np.asarray(point).flatten()
+
+        if len(point) >= 3:
+            # Take only first 3 dimensions if more are provided
+            return point[:3].copy()
+        else:
+            # Pad with zeros if less than 3 dimensions
+            padded = np.zeros(3)
+            padded[:len(point)] = point
+            return padded
 
     def remove_calibration_point(self, index: int) -> bool:
         """Remove a calibration point by index"""
@@ -147,9 +164,20 @@ class RegistrationManager:
             if not force_recompute and self.is_registered():
                 return True
 
-            # Extract points
-            machine_points = [point[0] for point in self.calibration_points]
-            camera_points = [point[1] for point in self.calibration_points]
+            # Extract points and ensure consistent 3D format
+            machine_points = []
+            camera_points = []
+
+            for machine_pos, camera_tvec, _ in self.calibration_points:
+                machine_3d = self._ensure_3d(machine_pos)
+                camera_3d = self._ensure_3d(camera_tvec)
+                machine_points.append(machine_3d)
+                camera_points.append(camera_3d)
+
+            # Debug logging
+            self.emit(RegistrationEvents.ERROR, f"Computing registration with {len(machine_points)} points")
+            self.emit(RegistrationEvents.ERROR, f"Machine points shape: {[p.shape for p in machine_points[:2]]}")
+            self.emit(RegistrationEvents.ERROR, f"Camera points shape: {[p.shape for p in camera_points[:2]]}")
 
             # Compute rigid transformation
             self.transformation_matrix, self.translation_vector = self._compute_rigid_transform(
@@ -171,48 +199,66 @@ class RegistrationManager:
         except Exception as e:
             error_msg = f"Registration computation failed: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
-            raise RuntimeError(error_msg)
+            # Don't re-raise to prevent cascade failures
+            return False
 
     def _compute_rigid_transform(self, A: List[np.ndarray], B: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
         """
         Compute rigid transformation (rotation + translation) from point set A to B
-        Using Kabsch algorithm
+        Using Kabsch algorithm with proper dimension handling
         """
-        A = np.asarray(A)
-        B = np.asarray(B)
+        try:
+            # Convert to numpy arrays and ensure 3D
+            A_array = np.array([self._ensure_3d(point) for point in A])  # Shape: (N, 3)
+            B_array = np.array([self._ensure_3d(point) for point in B])  # Shape: (N, 3)
 
-        # Ensure we have 3D points (pad with zeros if needed)
-        if A.shape[1] < 3:
-            A = np.column_stack([A, np.zeros((A.shape[0], 3 - A.shape[1]))])
-        if B.shape[1] < 3:
-            B = np.column_stack([B, np.zeros((B.shape[0], 3 - B.shape[1]))])
+            self.emit(RegistrationEvents.ERROR, f"A_array shape: {A_array.shape}")
+            self.emit(RegistrationEvents.ERROR, f"B_array shape: {B_array.shape}")
 
-        # Compute centroids
-        centroid_A = np.mean(A, axis=0)
-        centroid_B = np.mean(B, axis=0)
+            if A_array.shape[0] != B_array.shape[0]:
+                raise ValueError(f"Point count mismatch: A has {A_array.shape[0]}, B has {B_array.shape[0]}")
 
-        # Center the points
-        AA = A - centroid_A
-        BB = B - centroid_B
+            if A_array.shape[1] != 3 or B_array.shape[1] != 3:
+                raise ValueError(f"Points must be 3D: A shape {A_array.shape}, B shape {B_array.shape}")
 
-        # Compute cross-covariance matrix
-        H = AA.T @ BB
+            # Compute centroids
+            centroid_A = np.mean(A_array, axis=0)  # Shape: (3,)
+            centroid_B = np.mean(B_array, axis=0)  # Shape: (3,)
 
-        # SVD decomposition
-        U, _, Vt = np.linalg.svd(H)
+            self.emit(RegistrationEvents.ERROR, f"Centroids - A: {centroid_A.shape}, B: {centroid_B.shape}")
 
-        # Compute rotation matrix
-        R = Vt.T @ U.T
+            # Center the points
+            AA = A_array - centroid_A  # Shape: (N, 3)
+            BB = B_array - centroid_B  # Shape: (N, 3)
 
-        # Ensure proper rotation (det(R) = 1)
-        if np.linalg.det(R) < 0:
-            Vt[-1, :] *= -1
-            R = Vt.T @ U.T
+            # Compute cross-covariance matrix H = AA.T @ BB
+            H = AA.T @ BB  # Shape: (3, 3)
 
-        # Compute translation
-        t = centroid_B - R @ centroid_A
+            self.emit(RegistrationEvents.ERROR, f"H matrix shape: {H.shape}")
 
-        return R, t
+            # SVD decomposition
+            U, S, Vt = np.linalg.svd(H)
+
+            self.emit(RegistrationEvents.ERROR, f"SVD shapes - U: {U.shape}, S: {S.shape}, Vt: {Vt.shape}")
+
+            # Compute rotation matrix
+            R = Vt.T @ U.T  # Shape: (3, 3)
+
+            # Ensure proper rotation (det(R) = 1)
+            if np.linalg.det(R) < 0:
+                Vt[-1, :] *= -1
+                R = Vt.T @ U.T
+
+            # Compute translation
+            t = centroid_B - R @ centroid_A  # Shape: (3,)
+
+            self.emit(RegistrationEvents.ERROR, f"Final R shape: {R.shape}, t shape: {t.shape}")
+
+            return R, t
+
+        except Exception as e:
+            self.emit(RegistrationEvents.ERROR, f"Rigid transform computation error: {e}")
+            raise
 
     def transform_point(self, camera_point: np.ndarray) -> np.ndarray:
         """Transform a point from camera coordinates to machine coordinates"""
@@ -223,14 +269,14 @@ class RegistrationManager:
 
         try:
             # Ensure 3D point
-            if len(camera_point) < 3:
-                camera_point = np.append(camera_point, np.zeros(3 - len(camera_point)))
+            camera_3d = self._ensure_3d(camera_point)
 
-            transformed = self.transformation_matrix @ camera_point + self.translation_vector
+            # Apply transformation: R @ point + t
+            transformed = self.transformation_matrix @ camera_3d + self.translation_vector
 
             # Emit transformation event for debugging/logging
             self.emit(RegistrationEvents.POINT_TRANSFORMED, {
-                'camera_point': camera_point.copy(),
+                'camera_point': camera_3d.copy(),
                 'machine_point': transformed.copy()
             })
 
@@ -250,7 +296,7 @@ class RegistrationManager:
 
             self.emit(RegistrationEvents.BATCH_TRANSFORMED, {
                 'point_count': len(camera_points),
-                'camera_points': [p.copy() for p in camera_points],
+                'camera_points': [self._ensure_3d(p) for p in camera_points],
                 'machine_points': [p.copy() for p in transformed_points]
             })
 
@@ -338,7 +384,7 @@ class RegistrationManager:
             errors = []
             for machine_pos, camera_tvec, _ in self.calibration_points:
                 predicted_machine = self.transform_point(camera_tvec)
-                error = np.linalg.norm(predicted_machine - machine_pos)
+                error = np.linalg.norm(predicted_machine - self._ensure_3d(machine_pos))
                 errors.append(error)
 
             rms_error = np.sqrt(np.mean(np.square(errors)))
@@ -363,7 +409,7 @@ class RegistrationManager:
             for i, (machine_pos, camera_tvec, _) in enumerate(self.calibration_points):
                 try:
                     predicted_machine = self.transform_point(camera_tvec)
-                    error = np.linalg.norm(predicted_machine - machine_pos)
+                    error = np.linalg.norm(predicted_machine - self._ensure_3d(machine_pos))
                     point_errors.append(error)
                 except:
                     point_errors.append(float('inf'))
@@ -436,3 +482,34 @@ class RegistrationManager:
         except Exception as e:
             error_msg = f"Failed to reset registration: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
+
+    def debug_calibration_points(self):
+        """Debug method to print calibration point information"""
+        self.emit(RegistrationEvents.ERROR, f"=== CALIBRATION POINTS DEBUG ===")
+        self.emit(RegistrationEvents.ERROR, f"Total points: {len(self.calibration_points)}")
+
+        for i, (machine_pos, camera_tvec, norm_pos) in enumerate(self.calibration_points):
+            self.emit(RegistrationEvents.ERROR, f"Point {i}:")
+            self.emit(RegistrationEvents.ERROR, f"  Machine: {machine_pos} (shape: {machine_pos.shape})")
+            self.emit(RegistrationEvents.ERROR, f"  Camera:  {camera_tvec} (shape: {camera_tvec.shape})")
+            self.emit(RegistrationEvents.ERROR, f"  Norm:    {norm_pos}")
+
+        self.emit(RegistrationEvents.ERROR, f"=== END DEBUG ===")
+
+    def get_transformation_info(self) -> dict:
+        """Get detailed information about the current transformation"""
+        info = {
+            'is_registered': self.is_registered(),
+            'point_count': len(self.calibration_points),
+            'registration_error': self._registration_error
+        }
+
+        if self.is_registered():
+            info.update({
+                'rotation_matrix': self.transformation_matrix.tolist() if self.transformation_matrix is not None else None,
+                'translation_vector': self.translation_vector.tolist() if self.translation_vector is not None else None,
+                'rotation_matrix_shape': self.transformation_matrix.shape if self.transformation_matrix is not None else None,
+                'translation_vector_shape': self.translation_vector.shape if self.translation_vector is not None else None
+            })
+
+        return info
