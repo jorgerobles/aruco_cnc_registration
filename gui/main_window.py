@@ -4,14 +4,14 @@ Main GUI window that uses the new overlay architecture
 """
 
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, messagebox
 import time
 from typing import Optional
 
 from services.camera_manager import CameraManager
 from services.grbl_controller import GRBLController
 from services.registration_manager import RegistrationManager
-from gui.control_panels import ConnectionPanel, MachineControlPanel, RegistrationPanel, CalibrationPanel
+from gui.control_panels import ConnectionPanel, MachineControlPanel, RegistrationPanel, CalibrationPanel, SVGRoutesPanel
 from gui.camera_display import CameraDisplay
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
 from services.overlays.svg_routes_overlay import SVGRoutesOverlay
@@ -45,6 +45,7 @@ class RegistrationGUI:
         self.camera_display = None
         self.marker_overlay = None
         self.routes_overlay = None
+        self.svg_panel = None
         self.connection_panel = None
         self.machine_panel = None
         self.registration_panel = None
@@ -248,6 +249,8 @@ class RegistrationGUI:
             self.set_work_offset
         )
 
+        # SVG panel will be created in setup_display_panel after overlays are ready
+
     def setup_debug_controls(self, parent):
         """Setup debug controls section"""
         debug_ctrl_frame = ttk.LabelFrame(parent, text="Debug Controls")
@@ -306,6 +309,13 @@ class RegistrationGUI:
         # Configure overlays
         self.marker_overlay.set_visibility(True)
         self.routes_overlay.set_visibility(False)  # Hidden by default
+
+        # Create SVG routes panel now that overlays are ready
+        # Get the parent frame from the control panel setup
+        control_parent = self.connection_panel.frame.master
+        self.svg_panel = SVGRoutesPanel(
+            control_parent, self.routes_overlay, self.log
+        )
 
     def setup_debug_panel(self, parent):
         """Setup debug console panel"""
