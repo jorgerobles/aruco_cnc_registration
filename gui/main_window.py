@@ -1,11 +1,12 @@
 """
-Main Window (Fixed)
-Main GUI window that uses the new overlay architecture
+Updated Main Window using the improved GRBL controller
+Shows the simple change needed to use the new controller
 """
 
 import time
 import tkinter as tk
 from tkinter import ttk, scrolledtext
+from typing import List  # Add this import for type hints
 
 from gui.panel_connection import ConnectionPanel
 from gui.panel_calibration import CalibrationPanel
@@ -16,6 +17,7 @@ from gui.camera_display import CameraDisplay
 from services.camera_manager import CameraManager
 from services.event_broker import (event_aware, event_handler, EventBroker,
                                    CameraEvents, GRBLEvents, RegistrationEvents, ApplicationEvents, EventPriority)
+# Import the improved controller instead of the old one
 from services.grbl_controller import GRBLController
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
 from services.overlays.svg_routes_overlay import SVGRoutesOverlay
@@ -31,16 +33,26 @@ class RegistrationGUI:
         self.root.title("GRBL Camera Registration")
         self.root.geometry("1400x900")
 
+        # Initialize GUI state FIRST (before any event system setup)
+        self.debug_enabled = True
+        self.debug_text = None
+        self.status_var = None
+        self.camera_display = None
+        self.marker_overlay = None
+        self.routes_overlay = None
+        self.svg_panel = None
+        self.connection_panel = None
+        self.machine_panel = None
+        self.registration_panel = None
+        self.calibration_panel = None
+
         # Set up event broker logging (using the decorator's broker)
         self.setup_event_logging()
 
-        # Controllers and managers
-        self.grbl_controller = GRBLController()
+        # Controllers and managers - using the improved GRBL controller
+        self.grbl_controller = GRBLController()  # <-- Changed to improved version
         self.camera_manager = CameraManager()
         self.registration_manager = RegistrationManager()
-
-        # GUI state
-        self.debug_enabled = True
 
         # GUI components
         self.debug_text = None
@@ -130,6 +142,10 @@ class RegistrationGUI:
         if success:
             self.log("GRBL connected successfully", "info")
             self.status_var.set("GRBL connected")
+
+            # Get connection info for debugging
+            info = self.grbl_controller.get_connection_info()
+            self.log(f"GRBL Info: {info['serial_port']}@{info['baudrate']}, Status: {info['current_status']}")
         else:
             self.log("GRBL connection failed", "error")
             self.status_var.set("GRBL connection failed")
@@ -143,7 +159,30 @@ class RegistrationGUI:
     @event_handler(GRBLEvents.ERROR)
     def _on_grbl_error(self, error_message: str):
         """Handle GRBL error event"""
-        self.log(f"GRBL error: {error_message}", "error")
+        # Note: The improved controller uses ERROR events for both errors and debug info
+        # You might want to filter these based on content
+        if "✅" in error_message or "Testing" in error_message or "Sent:" in error_message or "Received:" in error_message:
+            # These are debug/info messages from the improved controller
+            self.log(f"GRBL Debug: {error_message}", "info")
+        else:
+            # These are actual errors
+            self.log(f"GRBL Error: {error_message}", "error")
+
+    @event_handler(GRBLEvents.STATUS_CHANGED)
+    def _on_grbl_status_changed(self, status: str):
+        """Handle GRBL status changes"""
+        self.log(f"GRBL Status: {status}", "info")
+        # Update status display if needed
+        if hasattr(self, 'machine_panel'):
+            # Update machine panel status if it has such functionality
+            pass
+
+    @event_handler(GRBLEvents.POSITION_CHANGED)
+    def _on_grbl_position_changed(self, position: List[float]):
+        """Handle GRBL position changes"""
+        # Only log significant position changes to avoid spam
+        # self.log(f"Position: X{position[0]:.3f} Y{position[1]:.3f} Z{position[2]:.3f}", "info")
+        pass
 
     @event_handler(RegistrationEvents.POINT_ADDED, EventPriority.HIGH)
     def _on_registration_point_added(self, point_data: dict):
@@ -284,6 +323,16 @@ class RegistrationGUI:
         ttk.Button(camera_status_frame, text="Refresh Camera Info",
                    command=self.update_camera_status).pack(pady=2)
 
+        # GRBL status display - NEW
+        grbl_status_frame = ttk.LabelFrame(debug_ctrl_frame, text="GRBL Status")
+        grbl_status_frame.pack(fill=tk.X, pady=5)
+
+        self.grbl_status_var = tk.StringVar(value="Disconnected")
+        ttk.Label(grbl_status_frame, textvariable=self.grbl_status_var).pack()
+
+        ttk.Button(grbl_status_frame, text="Refresh GRBL Info",
+                   command=self.update_grbl_status).pack(pady=2)
+
         # Event broker status
         event_status_frame = ttk.LabelFrame(debug_ctrl_frame, text="Event System")
         event_status_frame.pack(fill=tk.X, pady=5)
@@ -334,7 +383,12 @@ class RegistrationGUI:
         self.debug_text.tag_configure("info", foreground="gray")
 
     def log(self, message: str, level: str = "info"):
-        """Log message to debug console"""
+        """Log message to debug console with safe initialization handling"""
+        # Handle case where GUI is not fully initialized yet
+        if not hasattr(self, 'debug_enabled'):
+            print(f"[{level.upper()}] {message}")  # Fallback to console
+            return
+
         if self.debug_enabled and self.debug_text:
             timestamp = time.strftime("%H:%M:%S")
             tag_map = {
@@ -346,6 +400,9 @@ class RegistrationGUI:
             tag = tag_map.get(level, "info")
             self.debug_text.insert(tk.END, f"[{timestamp}] {message}\n", tag)
             self.debug_text.see(tk.END)
+        else:
+            # Fallback to console if debug_text is not ready
+            print(f"[{level.upper()}] {message}")
 
     def toggle_debug(self):
         """Toggle debug mode on/off"""
@@ -371,6 +428,18 @@ class RegistrationGUI:
             status = f"Disconnected (ID: {info['camera_id']})"
 
         self.camera_status_var.set(status)
+
+    def update_grbl_status(self):
+        """Update GRBL status display - NEW METHOD"""
+        if self.grbl_controller.is_connected:
+            info = self.grbl_controller.get_connection_info()
+            status = f"Connected ({info['serial_port']}@{info['baudrate']}, {info['current_status']})"
+            pos = info['current_position']
+            status += f" X:{pos[0]:.2f} Y:{pos[1]:.2f} Z:{pos[2]:.2f}"
+        else:
+            status = "Disconnected"
+
+        self.grbl_status_var.set(status)
 
     def show_event_stats(self):
         """Show event broker statistics"""
@@ -518,3 +587,22 @@ class RegistrationGUI:
         self.grbl_controller.disconnect()
 
         self.root.destroy()
+
+
+# Example of how to run the application with the improved controller
+if __name__ == "__main__":
+    import tkinter as tk
+
+    def main():
+        root = tk.Tk()
+        app = RegistrationGUI(root)
+
+        # Set up window close handler
+        root.protocol("WM_DELETE_WINDOW", app.on_closing)
+
+        try:
+            root.mainloop()
+        except KeyboardInterrupt:
+            app.on_closing()
+
+    main()
