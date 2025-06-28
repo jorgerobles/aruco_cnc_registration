@@ -1,5 +1,4 @@
 """
-Camera Manager (Cleaned)
 Handles camera connection, frame capture, and calibration
 Marker detection moved to MarkerDetectionOverlay
 """
@@ -11,11 +10,12 @@ from services.event_broker import event_aware, CameraEvents
 
 @event_aware()
 class CameraManager:
-    def __init__(self, camera_id=0):
+    def __init__(self, camera_id=0, resolution=(640,480,)):
         self.camera_id = camera_id
         self.cap = None
         self.camera_matrix = None
         self.dist_coeffs = None
+        self.resolution = resolution
 
         # Connection state
         self._is_connected = False
@@ -32,9 +32,14 @@ class CameraManager:
         try:
             self.cap = cv2.VideoCapture(self.camera_id)
             success = self.cap.isOpened()
-            self._is_connected = success
 
             if success:
+                # Set resolution to 1280x720
+                rw, rh = self.resolution
+
+                self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, rw)
+                self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, rh)
+
                 # Test capture to ensure camera is working
                 ret, test_frame = self.cap.read()
                 if not ret:
@@ -43,6 +48,8 @@ class CameraManager:
                     self.cap.release()
                     self.cap = None
                     self.emit(CameraEvents.ERROR, "Camera connected but unable to capture frames")
+                else:
+                    self._is_connected = success
 
             # Emit connection event with success status
             self.emit(CameraEvents.CONNECTED, success)
