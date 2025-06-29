@@ -1,10 +1,10 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, scrolledtext
 from typing import Callable, Optional
 
 
 class SVGRoutesPanel:
-    """SVG Routes AR overlay control panel with camera scale control"""
+    """SVG Routes AR overlay control panel with camera scale control and debug features"""
 
     def __init__(self, parent, routes_overlay, logger: Optional[Callable] = None):
         self.routes_overlay = routes_overlay
@@ -23,9 +23,14 @@ class SVGRoutesPanel:
         self.svg_offset_x_var = tk.IntVar(value=0)
         self.svg_offset_y_var = tk.IntVar(value=0)
 
-        # New AR-specific variables
+        # AR-specific variables
         self.pixels_per_mm_var = tk.DoubleVar(value=10.0)
         self.auto_scale_var = tk.BooleanVar(value=True)
+
+        # Debug variables
+        self.show_debug_info_var = tk.BooleanVar(value=True)
+        self.show_route_bounds_var = tk.BooleanVar(value=True)
+        self.show_coordinate_grid_var = tk.BooleanVar(value=False)
 
         # State
         self.routes_loaded = False
@@ -120,6 +125,49 @@ class SVGRoutesPanel:
         self.camera_info_label = ttk.Label(ar_frame, textvariable=self.camera_info_var,
                                            foreground="gray", font=("TkDefaultFont", 8))
         self.camera_info_label.pack(pady=1)
+
+        # Debug Controls
+        debug_frame = ttk.LabelFrame(self.frame, text="Debug & Visualization")
+        debug_frame.pack(fill=tk.X, pady=2)
+
+        # Debug display options
+        debug_options_frame = ttk.Frame(debug_frame)
+        debug_options_frame.pack(fill=tk.X, pady=1)
+
+        self.debug_info_check = ttk.Checkbutton(
+            debug_options_frame,
+            text="Show Debug Info",
+            variable=self.show_debug_info_var,
+            command=self.toggle_debug_info
+        )
+        self.debug_info_check.pack(side=tk.LEFT)
+
+        self.route_bounds_check = ttk.Checkbutton(
+            debug_options_frame,
+            text="Route Bounds",
+            variable=self.show_route_bounds_var,
+            command=self.toggle_route_bounds
+        )
+        self.route_bounds_check.pack(side=tk.LEFT, padx=(10, 0))
+
+        self.coordinate_grid_check = ttk.Checkbutton(
+            debug_options_frame,
+            text="Coordinate Grid",
+            variable=self.show_coordinate_grid_var,
+            command=self.toggle_coordinate_grid
+        )
+        self.coordinate_grid_check.pack(side=tk.LEFT, padx=(10, 0))
+
+        # Debug action buttons
+        debug_buttons_frame = ttk.Frame(debug_frame)
+        debug_buttons_frame.pack(fill=tk.X, pady=2)
+
+        ttk.Button(debug_buttons_frame, text="Print Route Summary",
+                   command=self.print_route_summary).pack(side=tk.LEFT, padx=2)
+        ttk.Button(debug_buttons_frame, text="Show Debug Window",
+                   command=self.show_debug_window).pack(side=tk.LEFT, padx=2)
+        ttk.Button(debug_buttons_frame, text="Export Debug Info",
+                   command=self.export_debug_info).pack(side=tk.LEFT, padx=2)
 
         # Route configuration
         config_frame = ttk.LabelFrame(self.frame, text="Appearance")
@@ -256,6 +304,10 @@ class SVGRoutesPanel:
                 self.update_camera_info()
                 self.enable_svg_controls()
 
+                # Auto-print route summary when debug is enabled
+                if self.show_debug_info_var.get():
+                    self.print_route_summary()
+
                 self.log(f"Loaded SVG routes from: {filename}")
 
             except Exception as e:
@@ -278,6 +330,181 @@ class SVGRoutesPanel:
 
         status = "visible" if visible else "hidden"
         self.log(f"SVG AR routes overlay {status}")
+
+    def toggle_debug_info(self):
+        """Toggle debug information display"""
+        show_debug = self.show_debug_info_var.get()
+        if hasattr(self.routes_overlay, 'enable_debug_display'):
+            self.routes_overlay.enable_debug_display(show_debug)
+        self.log(f"Debug info display {'enabled' if show_debug else 'disabled'}")
+
+    def toggle_route_bounds(self):
+        """Toggle route bounds display"""
+        show_bounds = self.show_route_bounds_var.get()
+        if hasattr(self.routes_overlay, 'enable_route_bounds_display'):
+            self.routes_overlay.enable_route_bounds_display(show_bounds)
+        self.log(f"Route bounds display {'enabled' if show_bounds else 'disabled'}")
+
+    def toggle_coordinate_grid(self):
+        """Toggle coordinate grid display"""
+        show_grid = self.show_coordinate_grid_var.get()
+        if hasattr(self.routes_overlay, 'enable_coordinate_grid'):
+            self.routes_overlay.enable_coordinate_grid(show_grid)
+        self.log(f"Coordinate grid {'enabled' if show_grid else 'disabled'}")
+
+    def print_route_summary(self):
+        """Print route summary to console/log"""
+        if hasattr(self.routes_overlay, 'print_route_summary'):
+            self.routes_overlay.print_route_summary()
+        else:
+            self.log("Route summary not available - overlay doesn't support debug info", "warning")
+
+    def show_debug_window(self):
+        """Show debug information in a separate window"""
+        if not hasattr(self.routes_overlay, 'get_debug_info'):
+            messagebox.showwarning("Debug Info", "Debug information not available")
+            return
+
+        debug_info = self.routes_overlay.get_debug_info()
+        if not debug_info:
+            messagebox.showinfo("Debug Info", "No debug information available")
+            return
+
+        # Create debug window
+        debug_window = tk.Toplevel()
+        debug_window.title("SVG Routes Debug Information")
+        debug_window.geometry("600x500")
+
+        # Create scrolled text widget
+        text_widget = scrolledtext.ScrolledText(debug_window, wrap=tk.WORD, width=70, height=30)
+        text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Format and insert debug information
+        debug_text = self._format_debug_info(debug_info)
+        text_widget.insert(tk.END, debug_text)
+        text_widget.config(state=tk.DISABLED)
+
+        # Add close button
+        close_button = ttk.Button(debug_window, text="Close", command=debug_window.destroy)
+        close_button.pack(pady=(0, 10))
+
+    def _format_debug_info(self, debug_info: dict) -> str:
+        """Format debug information for display"""
+        lines = []
+        lines.append("=" * 60)
+        lines.append("SVG ROUTES DEBUG INFORMATION")
+        lines.append("=" * 60)
+        lines.append("")
+
+        # Basic information
+        lines.append(f"File Path: {debug_info.get('file_path', 'N/A')}")
+        lines.append(f"Transform Mode: {debug_info.get('transform_mode', 'N/A')}")
+        lines.append(f"Route Count: {debug_info.get('route_count', 0)}")
+        lines.append(f"Total Points: {debug_info.get('total_points', 0)}")
+        lines.append(f"Total Length: {debug_info.get('total_length_mm', 0):.2f} mm")
+        lines.append(f"Average Route Length: {debug_info.get('average_route_length_mm', 0):.2f} mm")
+        lines.append(f"Average Points per Route: {debug_info.get('average_points_per_route', 0):.1f}")
+        lines.append("")
+
+        # SVG bounds
+        if 'svg_bounds' in debug_info:
+            svg = debug_info['svg_bounds']
+            lines.append("SVG Coordinate Space:")
+            lines.append(f"  Min X: {svg.get('min_x', 0):.2f}, Max X: {svg.get('max_x', 0):.2f}")
+            lines.append(f"  Min Y: {svg.get('min_y', 0):.2f}, Max Y: {svg.get('max_y', 0):.2f}")
+            lines.append(f"  Width: {svg.get('width', 0):.2f}, Height: {svg.get('height', 0):.2f}")
+            lines.append(f"  Center: ({svg.get('center_x', 0):.2f}, {svg.get('center_y', 0):.2f})")
+            lines.append("")
+
+        # Machine bounds
+        if 'machine_bounds' in debug_info:
+            machine = debug_info['machine_bounds']
+            lines.append("Machine Coordinate Space:")
+            lines.append(f"  Min X: {machine.get('min_x', 0):.2f} mm, Max X: {machine.get('max_x', 0):.2f} mm")
+            lines.append(f"  Min Y: {machine.get('min_y', 0):.2f} mm, Max Y: {machine.get('max_y', 0):.2f} mm")
+            lines.append(f"  Width: {machine.get('width', 0):.2f} mm, Height: {machine.get('height', 0):.2f} mm")
+            lines.append(f"  Center: ({machine.get('center_x', 0):.2f}, {machine.get('center_y', 0):.2f}) mm")
+            lines.append("")
+
+        # Camera information
+        if 'current_camera_position' in debug_info:
+            pos = debug_info['current_camera_position']
+            if pos:
+                lines.append(f"Camera Position: ({pos[0]:.2f}, {pos[1]:.2f}) mm")
+            else:
+                lines.append("Camera Position: Not set")
+
+        if 'current_scale_factor' in debug_info:
+            lines.append(f"Camera Scale Factor: {debug_info['current_scale_factor']:.2f} px/mm")
+        lines.append("")
+
+        # Registration information
+        if 'registration_info' in debug_info:
+            reg = debug_info['registration_info']
+            if reg and reg.get('available'):
+                lines.append("Registration Status:")
+                lines.append(f"  Available: {reg.get('available', False)}")
+                lines.append(f"  Registered: {reg.get('is_registered', False)}")
+                lines.append(f"  Calibration Points: {reg.get('point_count', 0)}")
+                if reg.get('registration_error') is not None:
+                    lines.append(f"  Registration Error: {reg['registration_error']:.3f} mm")
+                lines.append("")
+
+        # Individual routes
+        if 'individual_routes' in debug_info:
+            lines.append("Individual Routes:")
+            for route_info in debug_info['individual_routes']:
+                lines.append(f"  Route {route_info['index']}:")
+                lines.append(f"    Points: {route_info['point_count']}")
+                lines.append(f"    Length: {route_info['length_mm']:.2f} mm")
+                if route_info.get('start_point'):
+                    start = route_info['start_point']
+                    lines.append(f"    Start: ({start[0]:.2f}, {start[1]:.2f}) mm")
+                if route_info.get('end_point'):
+                    end = route_info['end_point']
+                    lines.append(f"    End: ({end[0]:.2f}, {end[1]:.2f}) mm")
+                lines.append("")
+
+        lines.append("=" * 60)
+        return "\n".join(lines)
+
+    def export_debug_info(self):
+        """Export debug information to file"""
+        if not hasattr(self.routes_overlay, 'get_debug_info'):
+            messagebox.showwarning("Export Debug", "Debug information not available")
+            return
+
+        debug_info = self.routes_overlay.get_debug_info()
+        if not debug_info:
+            messagebox.showinfo("Export Debug", "No debug information available")
+            return
+
+        # Ask user for save location
+        filename = filedialog.asksaveasfilename(
+            title="Export Debug Information",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("JSON files", "*.json"), ("All files", "*.*")]
+        )
+
+        if filename:
+            try:
+                if filename.lower().endswith('.json'):
+                    # Export as JSON
+                    import json
+                    with open(filename, 'w') as f:
+                        json.dump(debug_info, f, indent=2, default=str)
+                else:
+                    # Export as formatted text
+                    debug_text = self._format_debug_info(debug_info)
+                    with open(filename, 'w') as f:
+                        f.write(debug_text)
+
+                messagebox.showinfo("Export Debug", f"Debug information exported to:\n{filename}")
+                self.log(f"Debug information exported to: {filename}")
+
+            except Exception as e:
+                self.log(f"Failed to export debug info: {e}", "error")
+                messagebox.showerror("Export Error", f"Failed to export debug information:\n{e}")
 
     def toggle_auto_scale(self):
         """Toggle auto-scale mode"""
@@ -463,6 +690,13 @@ class SVGRoutesPanel:
                         total_length = self.routes_overlay.get_total_route_length()
                         info_text += f"\nLength: {total_length:.1f}mm"
 
+                # Add coordinate center information
+                if hasattr(self.routes_overlay, 'get_debug_info'):
+                    debug_info = self.routes_overlay.get_debug_info()
+                    if debug_info and 'machine_bounds' in debug_info:
+                        machine = debug_info['machine_bounds']
+                        info_text += f"\nCenter: ({machine.get('center_x', 0):.1f}, {machine.get('center_y', 0):.1f})mm"
+
                 self.svg_info_var.set(info_text)
                 self.svg_info_label.config(foreground="green")
             else:
@@ -483,6 +717,11 @@ class SVGRoutesPanel:
         # Enable AR controls
         self.auto_scale_check.config(state='normal')
         self.update_scale_controls()  # This will set the right state for scale controls
+
+        # Enable debug controls
+        self.debug_info_check.config(state='normal')
+        self.route_bounds_check.config(state='normal')
+        self.coordinate_grid_check.config(state='normal')
 
         # Enable manual transform controls if they exist
         if hasattr(self, 'svg_scale_spin'):
@@ -509,6 +748,9 @@ class SVGRoutesPanel:
         if hasattr(self, 'quick_scale_buttons'):
             for btn in self.quick_scale_buttons:
                 btn.config(state='disabled')
+
+        # Disable debug controls (but don't change their state)
+        # Users should be able to toggle debug settings even without routes
 
         # Disable manual transform controls if they exist
         if hasattr(self, 'svg_scale_spin'):

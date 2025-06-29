@@ -1,6 +1,6 @@
 """
-Updated Main Window using the improved GRBL controller
-Shows the simple change needed to use the new controller
+Updated Main Window using separate debug panel
+Shows the clean separation of concerns with dedicated debug panel
 """
 
 import time
@@ -13,6 +13,7 @@ from gui.panel_calibration import CalibrationPanel
 from gui.panel_machine import MachineControlPanel
 from gui.panel_registration import RegistrationPanel
 from gui.panel_svg import SVGRoutesPanel
+from gui.panel_debug import DebugPanel
 from gui.camera_display import CameraDisplay
 from services.camera_manager import CameraManager
 from services.event_broker import (event_aware, event_handler, EventBroker,
@@ -34,8 +35,6 @@ class RegistrationGUI:
         self.root.geometry("1400x900")
 
         # Initialize GUI state FIRST (before any event system setup)
-        self.debug_enabled = True
-        self.debug_text = None
         self.status_var = None
         self.camera_display = None
         self.marker_overlay = None
@@ -45,6 +44,7 @@ class RegistrationGUI:
         self.machine_panel = None
         self.registration_panel = None
         self.calibration_panel = None
+        self.debug_panel = None
 
         # Set up event broker logging (using the decorator's broker)
         self.setup_event_logging()
@@ -53,18 +53,6 @@ class RegistrationGUI:
         self.grbl_controller = GRBLController()  # <-- Changed to improved version
         self.camera_manager = CameraManager()
         self.registration_manager = RegistrationManager()
-
-        # GUI components
-        self.debug_text = None
-        self.status_var = None
-        self.camera_display = None
-        self.marker_overlay = None
-        self.routes_overlay = None
-        self.svg_panel = None
-        self.connection_panel = None
-        self.machine_panel = None
-        self.registration_panel = None
-        self.calibration_panel = None
 
         self.setup_gui()
 
@@ -79,8 +67,19 @@ class RegistrationGUI:
         broker.set_logger(self._event_log)
 
     def _event_log(self, message: str, level: str = "info"):
-        """Logger for event broker"""
-        self.log(message, level)
+        """Logger for event broker - direct to debug panel to avoid circular dependency"""
+        if self.debug_panel and self.debug_panel.is_ready():
+            # Call debug panel's log method directly, not through self.log()
+            self.debug_panel.log(message, level)
+        else:
+            print(f"[{level.upper()}] {message}")  # Fallback
+
+    def log(self, message: str, level: str = "info"):
+        """Main logging method - routes to debug panel"""
+        if self.debug_panel and self.debug_panel.is_ready():
+            self.debug_panel.log(message, level)
+        else:
+            print(f"[{level.upper()}] {message}")  # Fallback
 
     # Event handlers using decorators - automatically registered!
     @event_handler(CameraEvents.CONNECTED, EventPriority.HIGH)
@@ -159,14 +158,9 @@ class RegistrationGUI:
     @event_handler(GRBLEvents.ERROR)
     def _on_grbl_error(self, error_message: str):
         """Handle GRBL error event"""
-        # Note: The improved controller uses ERROR events for both errors and debug info
-        # You might want to filter these based on content
-        if "✅" in error_message or "Testing" in error_message or "Sent:" in error_message or "Received:" in error_message:
-            # These are debug/info messages from the improved controller
-            self.log(f"GRBL Debug: {error_message}", "info")
-        else:
-            # These are actual errors
-            self.log(f"GRBL Error: {error_message}", "error")
+        # Use debug panel's GRBL event logger for proper filtering
+        if self.debug_panel:
+            self.debug_panel.log_grbl_event(error_message, "error")
 
     @event_handler(GRBLEvents.STATUS_CHANGED)
     def _on_grbl_status_changed(self, status: str):
@@ -266,23 +260,21 @@ class RegistrationGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Create control panels
+        # Create control panels - PASS None AS LOGGER to avoid circular dependency
         self.connection_panel = ConnectionPanel(
-            scrollable_frame, self.grbl_controller, self.camera_manager, self.log
+            scrollable_frame, self.grbl_controller, self.camera_manager, None  # Changed
         )
 
-        self.setup_debug_controls(scrollable_frame)
-
         self.calibration_panel = CalibrationPanel(
-            scrollable_frame, self.camera_manager, self.log
+            scrollable_frame, self.camera_manager, None  # Changed
         )
 
         self.machine_panel = MachineControlPanel(
-            scrollable_frame, self.grbl_controller, self.log
+            scrollable_frame, self.grbl_controller, None  # Changed
         )
 
         self.registration_panel = RegistrationPanel(
-            scrollable_frame, self.registration_manager, self.log
+            scrollable_frame, self.registration_manager, None  # Changed
         )
 
         # Set up registration panel callbacks
@@ -291,54 +283,6 @@ class RegistrationGUI:
             self.test_position,
             self.set_work_offset
         )
-
-        # SVG panel will be created in setup_display_panel after overlays are ready
-
-    def setup_debug_controls(self, parent):
-        """Setup debug controls section"""
-        debug_ctrl_frame = ttk.LabelFrame(parent, text="Debug Controls")
-        debug_ctrl_frame.pack(fill=tk.X, pady=5, padx=5)
-
-        self.debug_var = tk.BooleanVar()
-        ttk.Checkbutton(debug_ctrl_frame, text="Enable Debug",
-                        variable=self.debug_var, command=self.toggle_debug).pack()
-
-        ttk.Button(debug_ctrl_frame, text="Clear Debug", command=self.clear_debug).pack(pady=2)
-
-        # Manual command entry
-        ttk.Label(debug_ctrl_frame, text="Manual GRBL Command:").pack()
-        self.manual_cmd_var = tk.StringVar()
-        cmd_entry = ttk.Entry(debug_ctrl_frame, textvariable=self.manual_cmd_var, width=20)
-        cmd_entry.pack()
-        cmd_entry.bind('<Return>', self.send_manual_command)
-        ttk.Button(debug_ctrl_frame, text="Send Command", command=self.send_manual_command).pack(pady=2)
-
-        # Camera status display
-        camera_status_frame = ttk.LabelFrame(debug_ctrl_frame, text="Camera Status")
-        camera_status_frame.pack(fill=tk.X, pady=5)
-
-        self.camera_status_var = tk.StringVar(value="Disconnected")
-        ttk.Label(camera_status_frame, textvariable=self.camera_status_var).pack()
-
-        ttk.Button(camera_status_frame, text="Refresh Camera Info",
-                   command=self.update_camera_status).pack(pady=2)
-
-        # GRBL status display - NEW
-        grbl_status_frame = ttk.LabelFrame(debug_ctrl_frame, text="GRBL Status")
-        grbl_status_frame.pack(fill=tk.X, pady=5)
-
-        self.grbl_status_var = tk.StringVar(value="Disconnected")
-        ttk.Label(grbl_status_frame, textvariable=self.grbl_status_var).pack()
-
-        ttk.Button(grbl_status_frame, text="Refresh GRBL Info",
-                   command=self.update_grbl_status).pack(pady=2)
-
-        # Event broker status
-        event_status_frame = ttk.LabelFrame(debug_ctrl_frame, text="Event System")
-        event_status_frame.pack(fill=tk.X, pady=5)
-
-        ttk.Button(event_status_frame, text="Show Event Stats",
-                   command=self.show_event_stats).pack(pady=2)
 
     def setup_display_panel(self, parent):
         """Setup camera display panel with overlays"""
@@ -371,105 +315,14 @@ class RegistrationGUI:
         )
 
     def setup_debug_panel(self, parent):
-        """Setup debug console panel"""
-        # Debug text area with scrollbar
-        self.debug_text = scrolledtext.ScrolledText(parent, height=8, wrap=tk.WORD)
-        self.debug_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        """Setup debug panel using the dedicated DebugPanel class"""
+        # Create the debug panel instance - PASS None AS LOGGER to avoid circular dependency
+        self.debug_panel = DebugPanel(
+            parent, self.grbl_controller, self.camera_manager, None  # Changed
+        )
 
-        # Configure text tags for different message types
-        self.debug_text.tag_configure("sent", foreground="blue")
-        self.debug_text.tag_configure("received", foreground="green")
-        self.debug_text.tag_configure("error", foreground="red")
-        self.debug_text.tag_configure("info", foreground="gray")
-
-    def log(self, message: str, level: str = "info"):
-        """Log message to debug console with safe initialization handling"""
-        # Handle case where GUI is not fully initialized yet
-        if not hasattr(self, 'debug_enabled'):
-            print(f"[{level.upper()}] {message}")  # Fallback to console
-            return
-
-        if self.debug_enabled and self.debug_text:
-            timestamp = time.strftime("%H:%M:%S")
-            tag_map = {
-                "info": "info",
-                "error": "error",
-                "sent": "sent",
-                "received": "received"
-            }
-            tag = tag_map.get(level, "info")
-            self.debug_text.insert(tk.END, f"[{timestamp}] {message}\n", tag)
-            self.debug_text.see(tk.END)
-        else:
-            # Fallback to console if debug_text is not ready
-            print(f"[{level.upper()}] {message}")
-
-    def toggle_debug(self):
-        """Toggle debug mode on/off"""
-        self.debug_enabled = self.debug_var.get()
-        if self.debug_enabled:
-            self.log("Debug mode enabled", "info")
-        else:
-            self.log("Debug mode disabled", "info")
-
-    def clear_debug(self):
-        """Clear debug console"""
-        self.debug_text.delete(1.0, tk.END)
-
-    def update_camera_status(self):
-        """Update camera status display"""
-        info = self.camera_manager.get_camera_info()
-        if info['connected']:
-            status = f"Connected (ID: {info['camera_id']}, {info['width']}x{info['height']}"
-            if info['calibrated']:
-                status += ", Calibrated"
-            status += ")"
-        else:
-            status = f"Disconnected (ID: {info['camera_id']})"
-
-        self.camera_status_var.set(status)
-
-    def update_grbl_status(self):
-        """Update GRBL status display - NEW METHOD"""
-        if self.grbl_controller.is_connected:
-            info = self.grbl_controller.get_connection_info()
-            status = f"Connected ({info['serial_port']}@{info['baudrate']}, {info['current_status']})"
-            pos = info['current_position']
-            status += f" X:{pos[0]:.2f} Y:{pos[1]:.2f} Z:{pos[2]:.2f}"
-        else:
-            status = "Disconnected"
-
-        self.grbl_status_var.set(status)
-
-    def show_event_stats(self):
-        """Show event broker statistics"""
-        event_types = self._event_broker.list_event_types()
-        stats = []
-        for event_type in event_types:
-            count = self._event_broker.get_subscriber_count(event_type)
-            stats.append(f"{event_type}: {count} subscribers")
-
-        if stats:
-            self.log("Event Statistics:")
-            for stat in stats:
-                self.log(f"  {stat}")
-        else:
-            self.log("No active event subscriptions")
-
-    def send_manual_command(self, event=None):
-        """Send manual GRBL command"""
-        command = self.manual_cmd_var.get().strip()
-        if not command:
-            return
-
-        try:
-            self.log(f"SENT: {command}", "sent")
-            response = self.grbl_controller.send_command(command)
-            for line in response:
-                self.log(f"RECV: {line}", "received")
-            self.manual_cmd_var.set("")  # Clear entry
-        except Exception as e:
-            self.log(f"ERROR: {e}", "error")
+        # Set event broker reference for statistics
+        self.debug_panel.set_event_broker(self._event_broker)
 
     def capture_point(self):
         """Capture calibration point (callback for registration panel)"""
@@ -559,7 +412,9 @@ class RegistrationGUI:
 
             self.camera_display.start_feed()
             self.log("Camera feed started", "info")
-            self.update_camera_status()
+            # Update camera status in debug panel
+            if self.debug_panel:
+                self.debug_panel.update_camera_status()
         else:
             self.log("Cannot start camera feed - camera not connected", "error")
 

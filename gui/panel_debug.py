@@ -1,0 +1,316 @@
+"""
+Debug Panel - Comprehensive debug console and controls
+Handles all debug functionality including console, manual commands, and status displays
+"""
+
+import time
+import tkinter as tk
+from tkinter import ttk, scrolledtext
+from typing import Callable, Optional
+
+
+class DebugPanel:
+    """Debug console and controls panel for GRBL Camera Registration application"""
+
+    def __init__(self, parent, grbl_controller, camera_manager, logger: Optional[Callable] = None):
+        self.grbl_controller = grbl_controller
+        self.camera_manager = camera_manager
+        self.logger = logger
+        self.parent = parent
+
+        # Debug state
+        self.debug_enabled = True
+        self.debug_text = None
+
+        # Variables for controls
+        self.debug_var = tk.BooleanVar(value=True)
+        self.manual_cmd_var = tk.StringVar()
+
+        # Event broker reference (will be set by main window)
+        self._event_broker = None
+
+        self._setup_debug_panel()
+
+    def set_event_broker(self, event_broker):
+        """Set the event broker reference for statistics"""
+        self._event_broker = event_broker
+
+    def _setup_debug_panel(self):
+        """Setup debug console panel with integrated debug controls"""
+        # Create main frame for debug panel content
+        main_debug_frame = ttk.Frame(self.parent)
+        main_debug_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+
+
+        # Console controls row (integrated into console frame)
+        console_controls_frame = ttk.Frame(main_debug_frame)
+        console_controls_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Checkbutton(console_controls_frame, text="Enable Debug",
+                        variable=self.debug_var, command=self.toggle_debug).pack(side=tk.LEFT)
+
+        ttk.Button(console_controls_frame, text="Clear Console",
+                   command=self.clear_debug).pack(side=tk.LEFT, padx=(10, 0))
+
+        ttk.Button(console_controls_frame, text="Show Event Stats",
+                   command=self.show_event_stats).pack(side=tk.LEFT, padx=(10, 0))
+
+        # Debug text area with scrollbar
+        self.debug_text = scrolledtext.ScrolledText(main_debug_frame, height=10, wrap=tk.WORD)
+        self.debug_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 5))
+
+        # Configure text tags for different message types
+        self.debug_text.tag_configure("sent", foreground="blue")
+        self.debug_text.tag_configure("received", foreground="green")
+        self.debug_text.tag_configure("error", foreground="red")
+        self.debug_text.tag_configure("info", foreground="gray")
+
+        # Manual GRBL command section
+        manual_cmd_frame = ttk.LabelFrame(main_debug_frame, text="Manual GRBL Command")
+        manual_cmd_frame.pack(fill=tk.X, pady=5)
+
+        # Command input row
+        cmd_input_frame = ttk.Frame(manual_cmd_frame)
+        cmd_input_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Label(cmd_input_frame, text="Command:").pack(side=tk.LEFT)
+
+        cmd_entry = ttk.Entry(cmd_input_frame, textvariable=self.manual_cmd_var)
+        cmd_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 5))
+        cmd_entry.bind('<Return>', self.send_manual_command)
+
+        ttk.Button(cmd_input_frame, text="Send",
+                   command=self.send_manual_command).pack(side=tk.RIGHT)
+
+        # Quick command buttons
+        quick_cmd_frame = ttk.Frame(manual_cmd_frame)
+        quick_cmd_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
+
+        ttk.Label(quick_cmd_frame, text="Quick:").pack(side=tk.LEFT)
+
+        quick_commands = [
+            ("?", "?"),  # Status query
+            ("$$", "$$"),  # Settings
+            ("$H", "$H"),  # Home
+            ("G90", "G90"),  # Absolute positioning
+            ("G91", "G91"),  # Relative positioning
+            ("M3", "M3 S1000"),  # Spindle on
+            ("M5", "M5")  # Spindle off
+        ]
+
+        for label, command in quick_commands:
+            btn = ttk.Button(quick_cmd_frame, text=label, width=4,
+                             command=lambda cmd=command: self.send_quick_command(cmd))
+            btn.pack(side=tk.LEFT, padx=1)
+
+        # Initialize with welcome message
+        self.log("Debug Panel initialized", "info")
+
+    def log(self, message: str, level: str = "info"):
+        """Log message to debug console with safe initialization handling"""
+        # Handle case where GUI is not fully initialized yet
+        if not hasattr(self, 'debug_enabled') or self.debug_enabled is None:
+            print(f"[{level.upper()}] {message}")  # Fallback to console
+            return
+
+        if self.debug_enabled and self.debug_text:
+            timestamp = time.strftime("%H:%M:%S")
+            tag_map = {
+                "info": "info",
+                "error": "error",
+                "sent": "sent",
+                "received": "received",
+                "warning": "error"  # Map warning to error color
+            }
+            tag = tag_map.get(level, "info")
+            self.debug_text.insert(tk.END, f"[{timestamp}] {message}\n", tag)
+            self.debug_text.see(tk.END)
+        else:
+            # Fallback to console if debug_text is not ready
+            print(f"[{level.upper()}] {message}")
+
+        # NOTE: Removed external logger call to prevent circular dependency
+        # The debug panel should be the final destination for log messages
+
+    def toggle_debug(self):
+        """Toggle debug mode on/off"""
+        self.debug_enabled = self.debug_var.get()
+        if self.debug_enabled:
+            self.log("Debug mode enabled", "info")
+        else:
+            self.log("Debug mode disabled", "info")
+
+    def clear_debug(self):
+        """Clear debug console"""
+        if self.debug_text:
+            self.debug_text.delete(1.0, tk.END)
+            self.log("Debug console cleared", "info")
+
+    def show_event_stats(self):
+        """Show event broker statistics"""
+        try:
+            if self._event_broker is None:
+                self.log("Event broker not available", "warning")
+                return
+
+            event_types = self._event_broker.list_event_types()
+            stats = []
+            for event_type in event_types:
+                count = self._event_broker.get_subscriber_count(event_type)
+                stats.append(f"{event_type}: {count} subscribers")
+
+            if stats:
+                self.log("Event Statistics:")
+                for stat in stats:
+                    self.log(f"  {stat}")
+            else:
+                self.log("No active event subscriptions")
+        except Exception as e:
+            self.log(f"Error getting event stats: {e}", "error")
+
+    def send_manual_command(self, event=None):
+        """Send manual GRBL command"""
+        command = self.manual_cmd_var.get().strip()
+        if not command:
+            return
+
+        try:
+            if not self.grbl_controller.is_connected:
+                self.log("GRBL not connected", "error")
+                return
+
+            self.log(f"SENT: {command}", "sent")
+            response = self.grbl_controller.send_command(command)
+            for line in response:
+                self.log(f"RECV: {line}", "received")
+            self.manual_cmd_var.set("")  # Clear entry
+        except Exception as e:
+            self.log(f"ERROR: {e}", "error")
+
+    def send_quick_command(self, command):
+        """Send a quick command by setting it in the entry field"""
+        self.manual_cmd_var.set(command)
+        self.send_manual_command()
+
+    def get_debug_enabled(self):
+        """Get current debug enabled state"""
+        return self.debug_enabled
+
+    def set_debug_enabled(self, enabled: bool):
+        """Set debug enabled state"""
+        self.debug_enabled = enabled
+        self.debug_var.set(enabled)
+
+    def is_ready(self):
+        """Check if debug panel is ready for logging"""
+        return self.debug_text is not None
+
+    def log_grbl_event(self, message: str, level: str = "info"):
+        """Log GRBL-specific events with filtering"""
+        # Filter debug messages from actual errors for GRBL events
+        if "✅" in message or "Testing" in message or "Sent:" in message or "Received:" in message:
+            # These are debug/info messages from the improved controller
+            self.log(f"GRBL Debug: {message}", "info")
+        else:
+            # These are actual errors or important messages
+            self.log(f"GRBL: {message}", level)
+
+    def log_camera_event(self, message: str, level: str = "info"):
+        """Log camera-specific events"""
+        self.log(f"Camera: {message}", level)
+
+    def log_registration_event(self, message: str, level: str = "info"):
+        """Log registration-specific events"""
+        self.log(f"Registration: {message}", level)
+
+    def log_application_event(self, message: str, level: str = "info"):
+        """Log application-level events"""
+        self.log(f"App: {message}", level)
+
+    def get_frame(self):
+        """Get the main frame for external access"""
+        return self.parent
+
+    def focus_command_entry(self):
+        """Focus the command entry field"""
+        # Find the command entry widget and focus it
+        for widget in self.parent.winfo_children():
+            if isinstance(widget, ttk.Frame):
+                for subwidget in widget.winfo_children():
+                    if isinstance(subwidget, ttk.LabelFrame) and "Manual GRBL Command" in subwidget.cget("text"):
+                        for cmd_widget in subwidget.winfo_children():
+                            if isinstance(cmd_widget, ttk.Frame):
+                                for entry_widget in cmd_widget.winfo_children():
+                                    if isinstance(entry_widget, ttk.Entry):
+                                        entry_widget.focus_set()
+                                        return
+
+    def insert_command(self, command: str):
+        """Insert a command into the command entry field"""
+        self.manual_cmd_var.set(command)
+
+    def get_console_content(self):
+        """Get all content from the debug console"""
+        if self.debug_text:
+            return self.debug_text.get(1.0, tk.END)
+        return ""
+
+    def save_console_to_file(self, filename: str):
+        """Save console content to a file"""
+        try:
+            content = self.get_console_content()
+            with open(filename, 'w') as f:
+                f.write(content)
+            self.log(f"Console saved to: {filename}")
+            return True
+        except Exception as e:
+            self.log(f"Error saving console: {e}", "error")
+            return False
+
+    def load_commands_from_file(self, filename: str):
+        """Load and execute commands from a file"""
+        try:
+            with open(filename, 'r') as f:
+                commands = f.readlines()
+
+            self.log(f"Loading commands from: {filename}")
+            for i, command in enumerate(commands, 1):
+                command = command.strip()
+                if command and not command.startswith('#'):  # Skip empty lines and comments
+                    self.log(f"Executing command {i}: {command}")
+                    self.manual_cmd_var.set(command)
+                    self.send_manual_command()
+                    time.sleep(0.1)  # Small delay between commands
+
+            self.log(f"Finished executing {len([c for c in commands if c.strip() and not c.startswith('#')])} commands")
+            return True
+        except Exception as e:
+            self.log(f"Error loading commands: {e}", "error")
+            return False
+
+    def add_debug_menu_items(self, menu):
+        """Add debug-specific menu items to a menu"""
+        debug_menu = tk.Menu(menu, tearoff=0)
+        menu.add_cascade(label="Debug", menu=debug_menu)
+
+        debug_menu.add_command(label="Clear Console", command=self.clear_debug)
+        debug_menu.add_separator()
+        debug_menu.add_command(label="Show Event Stats", command=self.show_event_stats)
+        debug_menu.add_separator()
+        debug_menu.add_checkbutton(label="Enable Debug", variable=self.debug_var, command=self.toggle_debug)
+
+    def get_statistics(self):
+        """Get debug panel statistics"""
+        stats = {
+            'debug_enabled': self.debug_enabled,
+            'console_lines': 0,
+            'camera_connected': self.camera_manager.is_connected if self.camera_manager else False,
+            'grbl_connected': self.grbl_controller.is_connected if self.grbl_controller else False
+        }
+
+        if self.debug_text:
+            content = self.debug_text.get(1.0, tk.END)
+            stats['console_lines'] = len(content.split('\n')) - 1  # -1 for the last empty line
+
+        return stats

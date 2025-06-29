@@ -1,6 +1,7 @@
 """
-Updated Connection Panel that works with both the original and improved GRBL controllers
-Shows how to adapt existing code to work with the new event-aware controller
+Updated Connection Panel with debug controls removed
+Debug controls are now moved to the debug console panel in main window
+This panel now focuses only on device connections and diagnostics
 """
 
 import tkinter as tk
@@ -13,7 +14,7 @@ from typing import Callable, Optional
 
 
 class ConnectionPanel:
-    """Connection controls that work with improved GRBL controller"""
+    """Connection controls focused on device connections and diagnostics"""
 
     def __init__(self, parent, grbl_controller, camera_manager, logger: Optional[Callable] = None):
         self.grbl_controller = grbl_controller
@@ -21,7 +22,7 @@ class ConnectionPanel:
         self.logger = logger
 
         # Create frame
-        self.frame = ttk.LabelFrame(parent, text="Connections & Diagnostics")
+        self.frame = ttk.LabelFrame(parent, text="Device Connections")
         self.frame.pack(fill=tk.X, pady=5, padx=5)
 
         # Variables
@@ -154,12 +155,26 @@ class ConnectionPanel:
                                                 state=tk.DISABLED)
         self.camera_disconnect_btn.pack(side=tk.LEFT)
 
-        # === Quick Status Section ===
-        quick_frame = ttk.LabelFrame(self.frame, text="Quick Status")
+        # === Quick Test Section ===
+        quick_frame = ttk.LabelFrame(self.frame, text="Quick Tests")
         quick_frame.pack(fill=tk.X, pady=5, padx=5)
 
-        ttk.Button(quick_frame, text="Test GRBL Communication", command=self._test_grbl_quick).pack(pady=2)
-        ttk.Button(quick_frame, text="Get GRBL Position", command=self._get_grbl_position).pack(pady=2)
+        # Test buttons in a grid
+        test_grid = ttk.Frame(quick_frame)
+        test_grid.pack(fill=tk.X, padx=5, pady=5)
+
+        ttk.Button(test_grid, text="Test GRBL Comm",
+                  command=self._test_grbl_quick, width=15).grid(row=0, column=0, padx=2, pady=2, sticky="ew")
+        ttk.Button(test_grid, text="Get Position",
+                  command=self._get_grbl_position, width=15).grid(row=0, column=1, padx=2, pady=2, sticky="ew")
+        ttk.Button(test_grid, text="Test Camera",
+                  command=self._test_camera_quick, width=15).grid(row=1, column=0, padx=2, pady=2, sticky="ew")
+        ttk.Button(test_grid, text="Get Status",
+                  command=self._get_detailed_status, width=15).grid(row=1, column=1, padx=2, pady=2, sticky="ew")
+
+        # Configure grid weights
+        test_grid.columnconfigure(0, weight=1)
+        test_grid.columnconfigure(1, weight=1)
 
     def _refresh_ports(self):
         """Refresh available serial ports"""
@@ -303,6 +318,67 @@ class ConnectionPanel:
                 self.log(f"Failed to get position: {e}", "error")
         else:
             self.log("GRBL not connected", "warning")
+
+    def _test_camera_quick(self):
+        """Quick camera test"""
+        try:
+            camera_id = int(self.camera_id_var.get())
+
+            if self.camera_manager.is_connected:
+                info = self.camera_manager.get_camera_info()
+                self.log(f"Camera test: Connected, ID={info['camera_id']}, "
+                        f"Resolution={info['width']}x{info['height']}, "
+                        f"Calibrated={info['calibrated']}")
+            else:
+                # Try a quick connection test
+                import cv2
+                cap = cv2.VideoCapture(camera_id)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        height, width = frame.shape[:2]
+                        self.log(f"Camera test: ID {camera_id} available, Resolution: {width}x{height}")
+                    else:
+                        self.log(f"Camera test: ID {camera_id} opened but no frame", "warning")
+                    cap.release()
+                else:
+                    self.log(f"Camera test: Cannot open camera ID {camera_id}", "error")
+
+        except Exception as e:
+            self.log(f"Camera test failed: {e}", "error")
+
+    def _get_detailed_status(self):
+        """Get detailed status from both devices"""
+        self.log("=== Detailed Status Report ===")
+
+        # GRBL Status
+        if self.grbl_controller.is_connected:
+            try:
+                status = self.grbl_controller.get_status()
+                position = self.grbl_controller.get_position()
+                info = self.grbl_controller.get_connection_info()
+
+                self.log(f"GRBL: Connected to {info['serial_port']}@{info['baudrate']}")
+                self.log(f"GRBL: Status={status}, Position=X{position[0]:.3f} Y{position[1]:.3f} Z{position[2]:.3f}")
+                self.log(f"GRBL: Detected={info['grbl_detected']}")
+            except Exception as e:
+                self.log(f"GRBL status error: {e}", "error")
+        else:
+            self.log("GRBL: Disconnected")
+
+        # Camera Status
+        if self.camera_manager.is_connected:
+            try:
+                info = self.camera_manager.get_camera_info()
+                self.log(f"Camera: Connected ID={info['camera_id']}, "
+                        f"Resolution={info['width']}x{info['height']}, "
+                        f"Calibrated={info['calibrated']}")
+            except Exception as e:
+                self.log(f"Camera status error: {e}", "error")
+        else:
+            self.log("Camera: Disconnected")
+
+        self.log("=== End Status Report ===")
 
     def connect_grbl(self):
         """Connect to GRBL controller with better error handling"""
