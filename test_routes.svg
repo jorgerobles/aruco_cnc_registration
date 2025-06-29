@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="100mm" height="100mm" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- Sample route 1: Rectangle -->
+  <path d="M 10 10 L 40 10 L 40 40 L 10 40 Z" fill="none" stroke="black" stroke-width="1"/>
+
+  <!-- Sample route 2: Circle-like path -->
+  <path d="M 60 25 Q 75 10 90 25 Q 75 40 60 25" fill="none" stroke="black" stroke-width="1"/>
+
+  <!-- Sample route 3: Zigzag -->
+  <path d="M 10 60 L 30 50 L 50 60 L 70 50 L 90 60" fill="none" stroke="black" stroke-width="1"/>
+
+  <!-- Sample route 4: Curved path -->
+  <path d="M 20 80 Q 50 70 80 80" fill="none" stroke="black" stroke-width="1"/>
+</svg>
