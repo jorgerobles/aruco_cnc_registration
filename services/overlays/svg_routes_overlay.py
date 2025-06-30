@@ -1,7 +1,8 @@
+# Enhanced svg_routes_overlay.py - Add MPOS movement support for AR calibration debugging
+
 """
-SVG Routes AR Overlay Component - Enhanced with Debug Information
-Routes are fixed to the camera view and move with it as true AR overlay
-Routes appear stationary in the real world (machine coordinate system)
+SVG Routes AR Overlay Component - Enhanced with MPOS Movement for AR Calibration Debugging
+Routes can be moved to current machine position to help identify calibration problems
 """
 
 import cv2
@@ -12,7 +13,7 @@ from services.overlays.overlay_interface import FrameOverlay
 
 
 class SVGRoutesOverlay(FrameOverlay):
-    """AR Component for displaying SVG routes fixed to camera view in machine coordinates"""
+    """AR Component for displaying SVG routes with MPOS movement for calibration debugging"""
 
     def __init__(self, registration_manager=None, logger: Optional[Callable] = None):
         self.registration_manager = registration_manager
@@ -21,6 +22,7 @@ class SVGRoutesOverlay(FrameOverlay):
         # Routes data - always stored in machine coordinates
         self.routes = []  # List of routes in machine coordinates (mm)
         self.svg_routes_original = []  # Original SVG coordinates for reference
+        self.routes_original_machine = []  # Original machine coordinates before any movement
 
         # Display settings
         self.visible = False
@@ -46,6 +48,12 @@ class SVGRoutesOverlay(FrameOverlay):
         self.camera_scale_factor = 10.0  # How many pixels per mm at current camera distance
         self.camera_rotation = 0.0  # Camera rotation in degrees (future enhancement)
 
+        # NEW: MPOS Movement state for AR calibration debugging
+        self.routes_moved_to_mpos = False
+        self.original_routes_center = None  # Store original center before movement
+        self.current_mpos_target = None  # Current target MPOS position
+        self.mpos_movement_offset = np.array([0.0, 0.0, 0.0])  # Additional offset from MPOS
+
         # Debug data storage
         self.route_debug_info = {}
         self.last_load_timestamp = None
@@ -55,6 +63,151 @@ class SVGRoutesOverlay(FrameOverlay):
         if self.logger:
             self.logger(message, level)
 
+    # NEW: MPOS Movement Methods for AR Calibration Debugging
+    def move_routes_to_position(self, target_x: float, target_y: float, target_z: float = 0.0):
+        """
+        Move all routes so their center is at the specified position
+
+        Args:
+            target_x, target_y, target_z: Target position in machine coordinates
+        """
+        try:
+            if not self.routes:
+                self.log("No routes to move", "warning")
+                return
+
+            # Store original routes if not already stored
+            if not self.routes_moved_to_mpos:
+                self.routes_original_machine = [route.copy() for route in self.routes]
+                self.original_routes_center = self._calculate_routes_center(self.routes)
+                self.log(f"Stored original routes center: {self.original_routes_center}")
+
+            # Calculate current routes center
+            current_center = self._calculate_routes_center(self.routes)
+            if current_center is None:
+                self.log("Cannot calculate routes center", "error")
+                return
+
+            # Calculate movement vector
+            target_position = np.array([target_x, target_y, target_z])
+            movement_vector = target_position - current_center
+
+            # Apply movement to all routes
+            moved_routes = []
+            for route in self.routes:
+                moved_route = []
+                for x, y in route:
+                    # Add movement to each point (only X,Y since routes are 2D)
+                    new_x = x + movement_vector[0]
+                    new_y = y + movement_vector[1]
+                    moved_route.append((new_x, new_y))
+                moved_routes.append(moved_route)
+
+            self.routes = moved_routes
+            self.routes_moved_to_mpos = True
+            self.current_mpos_target = target_position.copy()
+
+            self.log(f"Routes moved to position ({target_x:.2f}, {target_y:.2f}, {target_z:.2f})")
+            self.log(f"Movement vector: ({movement_vector[0]:.2f}, {movement_vector[1]:.2f}, {movement_vector[2]:.2f})")
+
+            # Update debug info
+            self._update_movement_debug_info()
+
+        except Exception as e:
+            self.log(f"Error moving routes to position: {e}", "error")
+            raise
+
+    def reset_routes_position(self):
+        """Reset routes to their original position before any movement"""
+        try:
+            if not self.routes_moved_to_mpos or not self.routes_original_machine:
+                self.log("Routes not moved or no original position stored", "info")
+                return
+
+            # Restore original routes
+            self.routes = [route.copy() for route in self.routes_original_machine]
+            self.routes_moved_to_mpos = False
+            self.current_mpos_target = None
+            self.mpos_movement_offset = np.array([0.0, 0.0, 0.0])
+
+            self.log("Routes reset to original position")
+
+            # Update debug info
+            self._update_movement_debug_info()
+
+        except Exception as e:
+            self.log(f"Error resetting routes position: {e}", "error")
+            raise
+
+    def set_mpos_movement_offset(self, offset_x: float, offset_y: float, offset_z: float = 0.0):
+        """
+        Set additional offset from MPOS position
+
+        Args:
+            offset_x, offset_y, offset_z: Offset from MPOS in mm
+        """
+        try:
+            self.mpos_movement_offset = np.array([offset_x, offset_y, offset_z])
+
+            # If routes are currently moved to MPOS, reapply the movement with new offset
+            if self.routes_moved_to_mpos and self.current_mpos_target is not None:
+                target_with_offset = self.current_mpos_target + self.mpos_movement_offset
+                self.move_routes_to_position(target_with_offset[0], target_with_offset[1], target_with_offset[2])
+
+            self.log(f"MPOS movement offset set to: ({offset_x:.1f}, {offset_y:.1f}, {offset_z:.1f})")
+
+        except Exception as e:
+            self.log(f"Error setting MPOS movement offset: {e}", "error")
+
+    def get_mpos_movement_status(self) -> dict:
+        """Get current MPOS movement status"""
+        return {
+            'routes_moved_to_mpos': self.routes_moved_to_mpos,
+            'current_mpos_target': self.current_mpos_target.tolist() if self.current_mpos_target is not None else None,
+            'mpos_movement_offset': self.mpos_movement_offset.tolist(),
+            'original_routes_center': self.original_routes_center,
+            'has_original_routes': len(self.routes_original_machine) > 0 if self.routes_original_machine else False
+        }
+
+    def _calculate_routes_center(self, routes: List[List[Tuple[float, float]]]) -> Optional[np.ndarray]:
+        """Calculate the center point of all routes"""
+        try:
+            if not routes:
+                return None
+
+            all_x = []
+            all_y = []
+
+            for route in routes:
+                for x, y in route:
+                    all_x.append(x)
+                    all_y.append(y)
+
+            if not all_x:
+                return None
+
+            center_x = sum(all_x) / len(all_x)
+            center_y = sum(all_y) / len(all_y)
+
+            return np.array([center_x, center_y, 0.0])
+
+        except Exception as e:
+            self.log(f"Error calculating routes center: {e}", "error")
+            return None
+
+    def _update_movement_debug_info(self):
+        """Update debug information with movement status"""
+        if self.route_debug_info:
+            movement_info = {
+                'routes_moved_to_mpos': self.routes_moved_to_mpos,
+                'current_mpos_target': self.current_mpos_target.tolist() if self.current_mpos_target is not None else None,
+                'mpos_movement_offset': self.mpos_movement_offset.tolist(),
+                'original_routes_center': self.original_routes_center,
+                'current_routes_center': self._calculate_routes_center(self.routes)
+            }
+            self.route_debug_info['mpos_movement'] = movement_info
+
+    # Enhanced existing methods to work with MPOS movement
     def enable_debug_display(self, enabled: bool = True):
         """Enable or disable debug information display"""
         self.show_debug_info = enabled
@@ -73,6 +226,7 @@ class SVGRoutesOverlay(FrameOverlay):
     def load_routes_from_svg(self, svg_file_path: str, angle_threshold: float = 5.0):
         """
         Load routes from SVG file and convert to machine coordinates using registration
+        Enhanced to reset MPOS movement when new routes are loaded
 
         Args:
             svg_file_path: Path to the SVG file
@@ -85,6 +239,11 @@ class SVGRoutesOverlay(FrameOverlay):
 
             if not os.path.exists(svg_file_path):
                 raise FileNotFoundError(f"SVG file not found: {svg_file_path}")
+
+            # Reset MPOS movement state when loading new routes
+            self.reset_routes_position()
+            self.routes_original_machine = []
+            self.original_routes_center = None
 
             self.last_load_timestamp = time.time()
 
@@ -101,7 +260,7 @@ class SVGRoutesOverlay(FrameOverlay):
                     self.camera_scale_factor = max(self.camera_scale_factor, 2.0)  # Minimum 2 px/mm
 
                 self.log(f"SVG scale: {svg_scale_x:.2f}x{svg_scale_y:.2f} mm/unit, "
-                        f"AR display scale: {self.camera_scale_factor:.2f} px/mm")
+                         f"AR display scale: {self.camera_scale_factor:.2f} px/mm")
 
             except Exception as e:
                 self.log(f"Could not extract SVG scale info: {e}", "warning")
@@ -115,8 +274,8 @@ class SVGRoutesOverlay(FrameOverlay):
 
             # Always transform to machine coordinates for AR overlay
             if (self.use_registration_transform and
-                self.registration_manager and
-                self.registration_manager.is_registered()):
+                    self.registration_manager and
+                    self.registration_manager.is_registered()):
 
                 self.routes = self._transform_svg_routes_to_machine(svg_routes)
                 transform_mode = "registration"
@@ -126,6 +285,9 @@ class SVGRoutesOverlay(FrameOverlay):
                 self.routes = svg_routes
                 transform_mode = "manual"
                 self.log(f"Loaded {len(self.routes)} routes in manual mode for AR")
+
+            # Store original machine coordinates for MPOS movement
+            self.routes_original_machine = [route.copy() for route in self.routes]
 
             # Calculate machine coordinate bounds
             machine_bounds = self._calculate_bounds(self.routes)
@@ -140,13 +302,14 @@ class SVGRoutesOverlay(FrameOverlay):
             self.log(f"Failed to load routes from SVG: {e}", "error")
             self.routes = []
             self.svg_routes_original = []
+            self.routes_original_machine = []
             self.route_debug_info = {}
 
     def _calculate_bounds(self, routes: List[List[Tuple[float, float]]]) -> dict:
         """Calculate bounds and statistics for a set of routes"""
         if not routes:
             return {"min_x": 0, "min_y": 0, "max_x": 0, "max_y": 0,
-                   "width": 0, "height": 0, "center_x": 0, "center_y": 0, "total_points": 0}
+                    "width": 0, "height": 0, "center_x": 0, "center_y": 0, "total_points": 0}
 
         all_x = []
         all_y = []
@@ -160,7 +323,7 @@ class SVGRoutesOverlay(FrameOverlay):
 
         if not all_x:
             return {"min_x": 0, "min_y": 0, "max_x": 0, "max_y": 0,
-                   "width": 0, "height": 0, "center_x": 0, "center_y": 0, "total_points": 0}
+                    "width": 0, "height": 0, "center_x": 0, "center_y": 0, "total_points": 0}
 
         min_x, max_x = min(all_x), max(all_x)
         min_y, max_y = min(all_y), max(all_y)
@@ -221,6 +384,9 @@ class SVGRoutesOverlay(FrameOverlay):
             "registration_info": self._get_registration_debug_info() if self.registration_manager else None
         }
 
+        # Add MPOS movement info
+        self._update_movement_debug_info()
+
     def _get_registration_debug_info(self) -> dict:
         """Get debug information about registration status"""
         if not self.registration_manager:
@@ -245,9 +411,9 @@ class SVGRoutesOverlay(FrameOverlay):
 
         info = self.route_debug_info
 
-        self.log("="*60, "info")
+        self.log("=" * 60, "info")
         self.log("ROUTE COORDINATE DEBUG INFORMATION", "info")
-        self.log("="*60, "info")
+        self.log("=" * 60, "info")
 
         # Basic information
         self.log(f"File: {os.path.basename(info['file_path'])}", "info")
@@ -256,17 +422,32 @@ class SVGRoutesOverlay(FrameOverlay):
         self.log(f"Total Points: {info['total_points']}", "info")
         self.log(f"Total Length: {info['total_length_mm']:.2f} mm", "info")
 
+        # MPOS Movement Status
+        if 'mpos_movement' in info:
+            mpos = info['mpos_movement']
+            self.log(f"\nMPOS Movement Status:", "info")
+            self.log(f"  Routes Moved: {mpos['routes_moved_to_mpos']}", "info")
+            if mpos['current_mpos_target']:
+                target = mpos['current_mpos_target']
+                self.log(f"  Current Target: ({target[0]:.2f}, {target[1]:.2f}, {target[2]:.2f}) mm", "info")
+            if mpos['original_routes_center']:
+                orig = mpos['original_routes_center']
+                self.log(f"  Original Center: ({orig[0]:.2f}, {orig[1]:.2f}, {orig[2]:.2f}) mm", "info")
+
         # SVG coordinate space
         svg = info['svg_bounds']
         self.log(f"\nSVG Coordinate Space:", "info")
-        self.log(f"  Bounds: X({svg['min_x']:.2f} to {svg['max_x']:.2f}) Y({svg['min_y']:.2f} to {svg['max_y']:.2f})", "info")
+        self.log(f"  Bounds: X({svg['min_x']:.2f} to {svg['max_x']:.2f}) Y({svg['min_y']:.2f} to {svg['max_y']:.2f})",
+                 "info")
         self.log(f"  Size: {svg['width']:.2f} x {svg['height']:.2f} units", "info")
         self.log(f"  Center: ({svg['center_x']:.2f}, {svg['center_y']:.2f})", "info")
 
         # Machine coordinate space
         machine = info['machine_bounds']
         self.log(f"\nMachine Coordinate Space:", "info")
-        self.log(f"  Bounds: X({machine['min_x']:.2f} to {machine['max_x']:.2f}) Y({machine['min_y']:.2f} to {machine['max_y']:.2f})", "info")
+        self.log(
+            f"  Bounds: X({machine['min_x']:.2f} to {machine['max_x']:.2f}) Y({machine['min_y']:.2f} to {machine['max_y']:.2f})",
+            "info")
         self.log(f"  Size: {machine['width']:.2f} x {machine['height']:.2f} mm", "info")
         self.log(f"  Center: ({machine['center_x']:.2f}, {machine['center_y']:.2f}) mm", "info")
 
@@ -279,16 +460,6 @@ class SVGRoutesOverlay(FrameOverlay):
             if reg.get('registration_error') is not None:
                 self.log(f"  Registration Error: {reg['registration_error']:.3f} mm", "info")
 
-        # Individual route details
-        self.log(f"\nFirst {len(info['individual_routes'])} Routes:", "info")
-        for route_info in info['individual_routes']:
-            self.log(f"  Route {route_info['index']}: {route_info['point_count']} points, "
-                    f"{route_info['length_mm']:.2f}mm", "info")
-            if route_info['start_point'] and route_info['end_point']:
-                start = route_info['start_point']
-                end = route_info['end_point']
-                self.log(f"    Start: ({start[0]:.2f}, {start[1]:.2f}) -> End: ({end[0]:.2f}, {end[1]:.2f})", "info")
-
         # Camera settings
         self.log(f"\nCamera AR Settings:", "info")
         self.log(f"  Scale Factor: {self.camera_scale_factor:.2f} pixels/mm", "info")
@@ -298,9 +469,10 @@ class SVGRoutesOverlay(FrameOverlay):
         else:
             self.log(f"  Camera Position: Not set", "info")
 
-        self.log("="*60, "info")
+        self.log("=" * 60, "info")
 
-    def _transform_svg_routes_to_machine(self, svg_routes: List[List[Tuple[float, float]]]) -> List[List[Tuple[float, float]]]:
+    def _transform_svg_routes_to_machine(self, svg_routes: List[List[Tuple[float, float]]]) -> List[
+        List[Tuple[float, float]]]:
         """
         Transform SVG routes to machine coordinates using the registration manager
 
@@ -360,42 +532,15 @@ class SVGRoutesOverlay(FrameOverlay):
             self.camera_scale_factor = scale_factor
 
         self.log(f"AR camera updated: position=({self.current_camera_position[0]:.1f}, "
-                f"{self.current_camera_position[1]:.1f}), scale={self.camera_scale_factor:.1f} px/mm")
+                 f"{self.current_camera_position[1]:.1f}), scale={self.camera_scale_factor:.1f} px/mm")
 
         # Update debug info with new camera position
         if self.route_debug_info:
             self.route_debug_info["current_camera_position"] = self.current_camera_position
             self.route_debug_info["current_scale_factor"] = self.camera_scale_factor
 
-    def update_camera_from_registration(self):
-        """
-        Update camera view automatically using current registration manager state
-        This should be called when you know the camera has moved
-        """
-        if not self.registration_manager or not self.registration_manager.is_registered():
-            return
-
-        try:
-            # Get current camera position from registration manager
-            # This would typically come from your camera system or tracking
-            # For now, we'll estimate from the registration center point
-            calibration_points = self.registration_manager.get_calibration_points_count()
-            if calibration_points > 0:
-                # Use center of calibration points as approximate camera position
-                machine_positions = self.registration_manager.get_machine_positions()
-                if machine_positions:
-                    center_x = sum(pos[0] for pos in machine_positions) / len(machine_positions)
-                    center_y = sum(pos[1] for pos in machine_positions) / len(machine_positions)
-                    center_z = sum(pos[2] for pos in machine_positions) / len(machine_positions)
-
-                    estimated_camera_pos = np.array([center_x, center_y, center_z])
-                    self.update_camera_view(estimated_camera_pos)
-
-        except Exception as e:
-            self.log(f"Error updating camera from registration: {e}", "error")
-
     def machine_to_camera_pixel(self, machine_x: float, machine_y: float,
-                               frame_shape: Tuple[int, int]) -> Tuple[int, int]:
+                                frame_shape: Tuple[int, int]) -> Tuple[int, int]:
         """
         Convert machine coordinates to camera pixel coordinates for AR overlay
 
@@ -438,14 +583,23 @@ class SVGRoutesOverlay(FrameOverlay):
             'camera_rotation': self.camera_rotation,
             'routes_count': len(self.routes),
             'registration_available': (self.registration_manager and
-                                     self.registration_manager.is_registered())
+                                       self.registration_manager.is_registered()),
+            'mpos_movement_status': self.get_mpos_movement_status()
         }
 
     def clear_routes(self):
         """Clear all loaded routes"""
         self.routes = []
         self.svg_routes_original = []
+        self.routes_original_machine = []
         self.route_debug_info = {}
+
+        # Reset MPOS movement state
+        self.routes_moved_to_mpos = False
+        self.original_routes_center = None
+        self.current_mpos_target = None
+        self.mpos_movement_offset = np.array([0.0, 0.0, 0.0])
+
         self.log("AR overlay routes cleared")
 
     def set_visibility(self, visible: bool):
@@ -485,6 +639,9 @@ class SVGRoutesOverlay(FrameOverlay):
 
         # Retransform routes based on the new setting
         if self.svg_routes_original:
+            # Reset MPOS movement before retransforming
+            self.reset_routes_position()
+
             if use_registration and self.registration_manager and self.registration_manager.is_registered():
                 # Transform to machine coordinates using registration
                 self.routes = self._transform_svg_routes_to_machine(self.svg_routes_original)
@@ -494,6 +651,9 @@ class SVGRoutesOverlay(FrameOverlay):
                 self.routes = self.svg_routes_original.copy()
                 self.log("AR overlay switched to direct SVG coordinates")
 
+            # Update original machine coordinates for MPOS movement
+            self.routes_original_machine = [route.copy() for route in self.routes]
+
             # Update debug info with new transformation
             machine_bounds = self._calculate_bounds(self.routes)
             svg_bounds = self._calculate_bounds(self.svg_routes_original)
@@ -502,6 +662,7 @@ class SVGRoutesOverlay(FrameOverlay):
             if hasattr(self, 'route_debug_info') and self.route_debug_info:
                 self.route_debug_info["machine_bounds"] = machine_bounds
                 self.route_debug_info["transform_mode"] = transform_mode
+                self._update_movement_debug_info()
                 self._log_route_coordinate_debug()
 
     def get_use_registration_transform(self) -> bool:
@@ -522,29 +683,6 @@ class SVGRoutesOverlay(FrameOverlay):
     def get_manual_transform(self) -> Tuple[float, Tuple[int, int]]:
         """Get current manual transformation parameters"""
         return (self.manual_scale, self.manual_offset)
-
-    def set_registration_manager(self, registration_manager):
-        """Set the registration manager and retransform routes if available"""
-        self.registration_manager = registration_manager
-
-        # If we have original SVG routes and are using registration mode, retransform them
-        if (self.svg_routes_original and
-            self.use_registration_transform and
-            registration_manager and
-            registration_manager.is_registered()):
-
-            self.routes = self._transform_svg_routes_to_machine(self.svg_routes_original)
-            self.log("AR overlay routes retransformed with new registration manager")
-
-            # Update camera view from registration
-            self.update_camera_from_registration()
-
-            # Update debug info
-            machine_bounds = self._calculate_bounds(self.routes)
-            if hasattr(self, 'route_debug_info') and self.route_debug_info:
-                self.route_debug_info["machine_bounds"] = machine_bounds
-                self.route_debug_info["registration_info"] = self._get_registration_debug_info()
-                self._log_route_coordinate_debug()
 
     def get_route_bounds(self) -> Optional[Tuple[float, float, float, float]]:
         """
@@ -579,36 +717,6 @@ class SVGRoutesOverlay(FrameOverlay):
             self.log(f"Error calculating route length: {e}", "error")
 
         return total_distance
-
-    def get_routes(self) -> List[List[Tuple[float, float]]]:
-        """Get all routes in machine coordinates"""
-        return self.routes.copy() if self.routes else []
-
-    def has_routes(self) -> bool:
-        """Check if any routes are loaded"""
-        return len(self.routes) > 0
-
-    def refresh_transformation(self):
-        """Refresh route transformation if registration manager has been updated"""
-        if self.svg_routes_original:
-            if (self.use_registration_transform and
-                self.registration_manager and
-                self.registration_manager.is_registered()):
-
-                self.log("Refreshing AR route transformation with registration...")
-                self.routes = self._transform_svg_routes_to_machine(self.svg_routes_original)
-                self.update_camera_from_registration()
-            else:
-                self.log("Refreshing AR route transformation without registration...")
-                self.routes = self.svg_routes_original.copy()
-
-            # Update debug info
-            machine_bounds = self._calculate_bounds(self.routes)
-            if hasattr(self, 'route_debug_info') and self.route_debug_info:
-                self.route_debug_info["machine_bounds"] = machine_bounds
-                self._log_route_coordinate_debug()
-
-            self.log("AR route transformation refreshed")
 
     def apply_overlay(self, frame: np.ndarray) -> np.ndarray:
         """
@@ -699,13 +807,13 @@ class SVGRoutesOverlay(FrameOverlay):
                     end_point = pixel_points[-1]
                     if (0 <= end_point[0] < frame.shape[1] and 0 <= end_point[1] < frame.shape[0]):
                         cv2.rectangle(overlay_frame,
-                                    (end_point[0] - 3, end_point[1] - 3),
-                                    (end_point[0] + 3, end_point[1] + 3),
-                                    (0, 0, 255), -1)
+                                      (end_point[0] - 3, end_point[1] - 3),
+                                      (end_point[0] + 3, end_point[1] + 3),
+                                      (0, 0, 255), -1)
                         cv2.rectangle(overlay_frame,
-                                    (end_point[0] - 4, end_point[1] - 4),
-                                    (end_point[0] + 4, end_point[1] + 4),
-                                    (0, 0, 0), 1)  # Black outline
+                                      (end_point[0] - 4, end_point[1] - 4),
+                                      (end_point[0] + 4, end_point[1] + 4),
+                                      (0, 0, 0), 1)  # Black outline
 
                 if pixel_points:
                     routes_drawn += 1
@@ -721,14 +829,49 @@ class SVGRoutesOverlay(FrameOverlay):
             # Draw scale reference
             self._draw_ar_scale_reference(overlay_frame, frame_shape)
 
+            # Draw MPOS movement status if enabled
+            if self.routes_moved_to_mpos:
+                self._draw_mpos_movement_indicator(overlay_frame, frame_shape)
+
         except Exception as e:
             self.log(f"Error drawing AR routes overlay: {e}", "error")
             # Add error indicator
             cv2.putText(overlay_frame, "AR overlay error",
-                       (10, frame.shape[0] - 60),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                        (10, frame.shape[0] - 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
         return overlay_frame
+
+    def _draw_mpos_movement_indicator(self, frame: np.ndarray, frame_shape: Tuple[int, int]):
+        """Draw indicator showing that routes have been moved to MPOS"""
+        try:
+            frame_height, frame_width = frame_shape
+
+            # Draw indicator in top-right corner
+            indicator_text = "MOVED TO MPOS"
+            text_size = cv2.getTextSize(indicator_text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+
+            # Background rectangle
+            bg_top_left = (frame_width - text_size[0] - 20, 10)
+            bg_bottom_right = (frame_width - 5, 35)
+            cv2.rectangle(frame, bg_top_left, bg_bottom_right, (0, 100, 200), -1)  # Orange background
+            cv2.rectangle(frame, bg_top_left, bg_bottom_right, (0, 0, 0), 1)  # Black border
+
+            # Text
+            cv2.putText(frame, indicator_text,
+                        (frame_width - text_size[0] - 15, 27),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+
+            # Add target position if available
+            if self.current_mpos_target is not None:
+                target = self.current_mpos_target
+                target_text = f"Target: ({target[0]:.1f}, {target[1]:.1f})"
+                cv2.putText(frame, target_text,
+                            (frame_width - 200, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+
+        except Exception as e:
+            self.log(f"Error drawing MPOS movement indicator: {e}", "error")
 
     def _draw_coordinate_grid(self, frame: np.ndarray, frame_shape: Tuple[int, int]):
         """Draw coordinate grid in machine coordinates"""
@@ -766,7 +909,7 @@ class SVGRoutesOverlay(FrameOverlay):
                 # Add coordinate label
                 if x % (grid_spacing * 2) == 0:  # Every other grid line
                     cv2.putText(frame, f"{x}", (pixel_x1 + 2, 15),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.3, (128, 128, 128), 1)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.3, (128, 128, 128), 1)
 
         # Draw horizontal lines
         for y in range(start_y, end_y + 1, grid_spacing):
@@ -778,7 +921,7 @@ class SVGRoutesOverlay(FrameOverlay):
                 # Add coordinate label
                 if y % (grid_spacing * 2) == 0:  # Every other grid line
                     cv2.putText(frame, f"{y}", (5, pixel_y1 - 2),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.3, (128, 128, 128), 1)
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.3, (128, 128, 128), 1)
 
     def _draw_route_bounds(self, frame: np.ndarray, frame_shape: Tuple[int, int]):
         """Draw bounding box around all routes"""
@@ -815,7 +958,7 @@ class SVGRoutesOverlay(FrameOverlay):
             if (0 <= center_x < frame_shape[1] and 0 <= center_y < frame_shape[0]):
                 bounds_text = f"Bounds: {max_x - min_x:.1f}x{max_y - min_y:.1f}mm"
                 cv2.putText(frame, bounds_text, (center_x - 50, center_y),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128, 255, 128), 1)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128, 255, 128), 1)
 
     def _draw_debug_info(self, frame: np.ndarray, routes_drawn: int, total_points_drawn: int):
         """Draw comprehensive debug information on the frame"""
@@ -835,6 +978,17 @@ class SVGRoutesOverlay(FrameOverlay):
 
         # Transform mode and coordinates
         debug_lines.append(f"Mode: {info['transform_mode'].title()}")
+
+        # MPOS Movement Status
+        if 'mpos_movement' in info:
+            mpos = info['mpos_movement']
+            if mpos['routes_moved_to_mpos']:
+                debug_lines.append("MPOS Movement: ENABLED")
+                if mpos['current_mpos_target']:
+                    target = mpos['current_mpos_target']
+                    debug_lines.append(f"  Target: ({target[0]:.1f}, {target[1]:.1f})")
+            else:
+                debug_lines.append("MPOS Movement: Disabled")
 
         machine = info['machine_bounds']
         debug_lines.append(f"Machine Bounds:")
@@ -863,15 +1017,6 @@ class SVGRoutesOverlay(FrameOverlay):
             else:
                 debug_lines.append("Registration: Not calibrated")
 
-        # Individual route information (first few routes)
-        if info.get('individual_routes'):
-            debug_lines.append("First Routes:")
-            for route_info in info['individual_routes'][:3]:  # Show first 3 routes
-                debug_lines.append(f"  {route_info['index']}: {route_info['point_count']}pts, {route_info['length_mm']:.1f}mm")
-                if route_info['start_point']:
-                    start = route_info['start_point']
-                    debug_lines.append(f"    Start: ({start[0]:.1f}, {start[1]:.1f})")
-
         # Draw debug background
         max_width = max([len(line) for line in debug_lines]) * 6
         debug_height = len(debug_lines) * self.debug_line_spacing + 10
@@ -885,7 +1030,7 @@ class SVGRoutesOverlay(FrameOverlay):
         for i, line in enumerate(debug_lines):
             y_pos = y_offset + (i * self.debug_line_spacing)
             cv2.putText(frame, line, (10, y_pos),
-                       cv2.FONT_HERSHEY_SIMPLEX, self.debug_text_size, (0, 255, 255), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, self.debug_text_size, (0, 255, 255), 1)
 
     def _draw_camera_position_indicator(self, frame: np.ndarray, frame_shape: Tuple[int, int]):
         """Draw camera position indicator (crosshair at center)"""
@@ -894,9 +1039,9 @@ class SVGRoutesOverlay(FrameOverlay):
 
         # Draw crosshair
         cv2.line(frame, (center_x - 10, center_y), (center_x + 10, center_y),
-                (255, 255, 255), 2)
+                 (255, 255, 255), 2)
         cv2.line(frame, (center_x, center_y - 10), (center_x, center_y + 10),
-                (255, 255, 255), 2)
+                 (255, 255, 255), 2)
         cv2.circle(frame, (center_x, center_y), 3, (0, 255, 255), -1)
 
         # Add coordinate text if camera position is known
@@ -904,7 +1049,7 @@ class SVGRoutesOverlay(FrameOverlay):
             cam_x, cam_y = self.current_camera_position
             coord_text = f"({cam_x:.1f}, {cam_y:.1f})"
             cv2.putText(frame, coord_text, (center_x + 15, center_y - 5),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
     def _draw_ar_scale_reference(self, frame: np.ndarray, frame_shape: Tuple[int, int]):
         """Draw scale reference for AR overlay"""
@@ -927,15 +1072,20 @@ class SVGRoutesOverlay(FrameOverlay):
 
                 # Draw label
                 cv2.putText(frame, f"{reference_length_mm:.0f}mm",
-                           (start_x, y_pos - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
+                            (start_x, y_pos - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
         except Exception as e:
             self.log(f"Error drawing AR scale reference: {e}", "error")
 
     def get_debug_info(self) -> dict:
         """Get comprehensive debug information"""
-        return self.route_debug_info.copy() if self.route_debug_info else {}
+        debug_info = self.route_debug_info.copy() if self.route_debug_info else {}
+
+        # Add current MPOS movement status
+        debug_info['mpos_movement_status'] = self.get_mpos_movement_status()
+
+        return debug_info
 
     def print_route_summary(self):
         """Print a summary of route coordinates to console/log"""
@@ -945,15 +1095,27 @@ class SVGRoutesOverlay(FrameOverlay):
 
         info = self.route_debug_info
 
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("ROUTE COORDINATE SUMMARY")
-        print("="*80)
+        print("=" * 80)
 
         print(f"File: {os.path.basename(info['file_path'])}")
         print(f"Transform Mode: {info['transform_mode']}")
         print(f"Total Routes: {info['route_count']}")
         print(f"Total Points: {info['total_points']}")
         print(f"Total Length: {info['total_length_mm']:.2f} mm")
+
+        # MPOS Movement Status
+        if 'mpos_movement' in info:
+            mpos = info['mpos_movement']
+            print(f"\nMPOS Movement Status:")
+            print(f"  Routes Moved to MPOS: {mpos['routes_moved_to_mpos']}")
+            if mpos['current_mpos_target']:
+                target = mpos['current_mpos_target']
+                print(f"  Current Target: ({target[0]:.2f}, {target[1]:.2f}, {target[2]:.2f}) mm")
+            if mpos['original_routes_center']:
+                orig = mpos['original_routes_center']
+                print(f"  Original Center: ({orig[0]:.2f}, {orig[1]:.2f}, {orig[2]:.2f}) mm")
 
         print(f"\nMachine Coordinate Bounds:")
         machine = info['machine_bounds']
@@ -966,19 +1128,49 @@ class SVGRoutesOverlay(FrameOverlay):
             print(f"\nCamera Position: ({cam_x:.2f}, {cam_y:.2f}) mm")
 
             # Calculate distances from camera to route bounds
-            dist_to_center = np.sqrt((machine['center_x'] - cam_x)**2 + (machine['center_y'] - cam_y)**2)
+            dist_to_center = np.sqrt((machine['center_x'] - cam_x) ** 2 + (machine['center_y'] - cam_y) ** 2)
             print(f"Distance to Route Center: {dist_to_center:.2f} mm")
 
-        if info.get('individual_routes'):
-            print(f"\nIndividual Routes:")
-            for route_info in info['individual_routes']:
-                print(f"  Route {route_info['index']}: {route_info['point_count']} points, {route_info['length_mm']:.1f} mm")
-                if route_info['start_point'] and route_info['end_point']:
-                    start = route_info['start_point']
-                    end = route_info['end_point']
-                    print(f"    Start: ({start[0]:.2f}, {start[1]:.2f}) -> End: ({end[0]:.2f}, {end[1]:.2f})")
+        print("=" * 80)
 
-        print("="*80)
+    def refresh_transformation(self):
+        """Refresh route transformation if registration manager has been updated"""
+        if self.svg_routes_original:
+            # Store current MPOS movement state
+            was_moved = self.routes_moved_to_mpos
+            current_target = self.current_mpos_target.copy() if self.current_mpos_target is not None else None
+
+            if (self.use_registration_transform and
+                    self.registration_manager and
+                    self.registration_manager.is_registered()):
+
+                self.log("Refreshing AR route transformation with registration...")
+                # Reset to original position first
+                self.reset_routes_position()
+                # Retransform
+                self.routes = self._transform_svg_routes_to_machine(self.svg_routes_original)
+                # Update original machine coordinates
+                self.routes_original_machine = [route.copy() for route in self.routes]
+            else:
+                self.log("Refreshing AR route transformation without registration...")
+                # Reset to original position first
+                self.reset_routes_position()
+                self.routes = self.svg_routes_original.copy()
+                # Update original machine coordinates
+                self.routes_original_machine = [route.copy() for route in self.routes]
+
+            # Restore MPOS movement if it was enabled
+            if was_moved and current_target is not None:
+                self.move_routes_to_position(current_target[0], current_target[1], current_target[2])
+
+            # Update debug info
+            machine_bounds = self._calculate_bounds(self.routes)
+            if hasattr(self, 'route_debug_info') and self.route_debug_info:
+                self.route_debug_info["machine_bounds"] = machine_bounds
+                self._update_movement_debug_info()
+                self._log_route_coordinate_debug()
+
+            self.log("AR route transformation refreshed")
 
     def export_routes_info(self) -> dict:
         """Export comprehensive AR route information"""
@@ -988,6 +1180,7 @@ class SVGRoutesOverlay(FrameOverlay):
             'route_bounds': self.get_route_bounds(),
             'total_length_mm': self.get_total_route_length(),
             'camera_info': self.get_camera_info(),
+            'mpos_movement_status': self.get_mpos_movement_status(),
             'display_settings': {
                 'visible': self.visible,
                 'color': self.route_color,
@@ -1004,7 +1197,7 @@ class SVGRoutesOverlay(FrameOverlay):
             'registration_status': {
                 'has_registration_manager': self.registration_manager is not None,
                 'is_registered': (self.registration_manager and
-                                self.registration_manager.is_registered() if self.registration_manager else False)
+                                  self.registration_manager.is_registered() if self.registration_manager else False)
             }
         }
 
