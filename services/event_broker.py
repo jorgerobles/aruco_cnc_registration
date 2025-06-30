@@ -349,8 +349,7 @@ class AutoEventSubscriber(EventSubscriber):
                     attr._event_priority
                 )
 
-
-# Predefined event types
+# Predefined event types - Updated to include DEBUG_INFO
 class CameraEvents:
     CONNECTED = "camera.connected"
     DISCONNECTED = "camera.disconnected"
@@ -383,6 +382,7 @@ class RegistrationEvents:
     VALIDATION_PASSED = "registration.validation_passed"
     VALIDATION_FAILED = "registration.validation_failed"
     ERROR = "registration.error"
+    DEBUG_INFO = "registration.debug_info"  # New event for debug information
 
 
 class ApplicationEvents:

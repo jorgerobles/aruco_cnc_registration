@@ -2,7 +2,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, scrolledtext
 from typing import Callable, Optional
 
+from services.event_broker import (event_aware, event_handler, EventPriority,
+                                   CameraEvents, RegistrationEvents, GRBLEvents)
 
+
+@event_aware()
 class SVGRoutesPanel:
     """SVG Routes AR overlay control panel with camera scale control and debug features"""
 
@@ -34,6 +38,8 @@ class SVGRoutesPanel:
 
         # State
         self.routes_loaded = False
+        self.camera_connected = False
+        self.registration_available = False
 
         self._setup_widgets()
 
@@ -41,6 +47,88 @@ class SVGRoutesPanel:
         """Log message if logger is available"""
         if self.logger:
             self.logger(message, level)
+
+    # Event handlers using decorators
+    @event_handler(CameraEvents.CONNECTED)
+    def _on_camera_connected(self, success: bool):
+        """Handle camera connection events"""
+        if success:
+            self.camera_connected = True
+            self.log("Camera connected - updating overlay camera info")
+            self.update_camera_info()
+        else:
+            self.camera_connected = False
+
+    @event_handler(CameraEvents.DISCONNECTED)
+    def _on_camera_disconnected(self):
+        """Handle camera disconnection events"""
+        self.camera_connected = False
+        self.log("Camera disconnected - overlay camera view unavailable")
+        self.update_camera_info()
+
+    @event_handler(RegistrationEvents.COMPUTED, EventPriority.HIGH)
+    def _on_registration_computed(self, computation_data: dict):
+        """Handle registration computation events"""
+        self.registration_available = True
+        error = computation_data.get('error', 0.0)
+        self.log(f"Registration computed - SVG overlay can use registration transform (error: {error:.4f})")
+
+        # If using registration transform, refresh the overlay
+        if self.svg_use_registration_var.get() and self.routes_loaded:
+            self.refresh_overlay()
+
+    @event_handler(RegistrationEvents.CLEARED)
+    def _on_registration_cleared(self):
+        """Handle registration cleared events"""
+        self.registration_available = False
+        self.log("Registration cleared - SVG overlay will use manual transform")
+
+        # Switch to manual transform mode if registration was being used
+        if self.svg_use_registration_var.get():
+            self.svg_use_registration_var.set(False)
+            self.toggle_svg_transform_mode()
+
+    @event_handler(RegistrationEvents.LOADED)
+    def _on_registration_loaded(self, file_path: str):
+        """Handle registration loaded events"""
+        self.registration_available = True
+        self.log(f"Registration loaded from {file_path} - SVG overlay can use registration transform")
+
+        # Refresh overlay if using registration transform
+        if self.svg_use_registration_var.get() and self.routes_loaded:
+            self.refresh_overlay()
+
+    @event_handler(RegistrationEvents.POINT_TRANSFORMED)
+    def _on_point_transformed(self, transform_data: dict):
+        """Handle point transformation events - update camera position"""
+        if self.routes_loaded and self.camera_connected:
+            try:
+                # Get transformed point if available
+                if 'machine_point' in transform_data:
+                    machine_point = transform_data['machine_point']
+                    self.update_camera_position(machine_point)
+            except Exception as e:
+                self.log(f"Error updating camera position from transform: {e}", "error")
+
+    @event_handler(GRBLEvents.POSITION_CHANGED)
+    def _on_grbl_position_changed(self, position: list):
+        """Handle GRBL position changes to update camera view"""
+        # Only update camera position occasionally to avoid spam
+        if hasattr(self, '_last_camera_update'):
+            import time
+            now = time.time()
+            if now - self._last_camera_update < 0.5:  # Update at most every 0.5 seconds
+                return
+
+        import time
+        self._last_camera_update = time.time()
+
+        if self.routes_loaded and self.registration_available:
+            try:
+                # Update camera position based on machine position
+                self.update_camera_position(position[:2])  # Use X,Y only
+            except Exception as e:
+                self.log(f"Error updating camera position from GRBL: {e}", "error")
 
     def _setup_widgets(self):
         """Setup SVG routes control widgets"""
@@ -107,6 +195,7 @@ class SVGRoutesPanel:
             ("20x", 20.0)
         ]
 
+        self.quick_scale_buttons = []
         for label, scale in quick_scales:
             btn = ttk.Button(
                 quick_scale_frame,
@@ -115,9 +204,6 @@ class SVGRoutesPanel:
                 command=lambda s=scale: self.set_quick_scale(s)
             )
             btn.pack(side=tk.LEFT, padx=1)
-            # Store reference to disable later
-            if not hasattr(self, 'quick_scale_buttons'):
-                self.quick_scale_buttons = []
             self.quick_scale_buttons.append(btn)
 
         # Camera position display
@@ -310,6 +396,10 @@ class SVGRoutesPanel:
 
                 self.log(f"Loaded SVG routes from: {filename}")
 
+                # Emit event about routes being loaded
+                if hasattr(self, 'emit'):
+                    self.emit('svg.routes_loaded', filename)
+
             except Exception as e:
                 self.log(f"Failed to load SVG routes: {e}", "error")
                 messagebox.showerror("Error", f"Failed to load SVG routes: {e}")
@@ -323,6 +413,10 @@ class SVGRoutesPanel:
         self.disable_svg_controls()
         self.log("SVG routes cleared")
 
+        # Emit event about routes being cleared
+        if hasattr(self, 'emit'):
+            self.emit('svg.routes_cleared')
+
     def toggle_svg_visibility(self):
         """Toggle SVG routes overlay visibility"""
         visible = self.svg_visible_var.get()
@@ -330,6 +424,10 @@ class SVGRoutesPanel:
 
         status = "visible" if visible else "hidden"
         self.log(f"SVG AR routes overlay {status}")
+
+        # Emit visibility change event
+        if hasattr(self, 'emit'):
+            self.emit('svg.visibility_changed', visible)
 
     def toggle_debug_info(self):
         """Toggle debug information display"""
@@ -404,6 +502,13 @@ class SVGRoutesPanel:
         lines.append(f"Total Length: {debug_info.get('total_length_mm', 0):.2f} mm")
         lines.append(f"Average Route Length: {debug_info.get('average_route_length_mm', 0):.2f} mm")
         lines.append(f"Average Points per Route: {debug_info.get('average_points_per_route', 0):.1f}")
+        lines.append("")
+
+        # Event system status
+        lines.append("Event System Status:")
+        lines.append(f"  Camera Connected: {self.camera_connected}")
+        lines.append(f"  Registration Available: {self.registration_available}")
+        lines.append(f"  Routes Loaded: {self.routes_loaded}")
         lines.append("")
 
         # SVG bounds
@@ -528,10 +633,9 @@ class SVGRoutesPanel:
         self.pixels_per_mm_spin.config(state=scale_state)
 
         # Enable/disable quick scale buttons
-        if hasattr(self, 'quick_scale_buttons'):
-            button_state = 'disabled' if auto_scale else 'normal'
-            for btn in self.quick_scale_buttons:
-                btn.config(state=button_state)
+        button_state = 'disabled' if auto_scale else 'normal'
+        for btn in self.quick_scale_buttons:
+            btn.config(state=button_state)
 
     def set_quick_scale(self, scale_factor: float):
         """Set a quick scale value"""
@@ -589,7 +693,12 @@ class SVGRoutesPanel:
                     info_text = f"Cam: Not set @ {camera_info['camera_scale_factor']:.1f}px/mm"
 
                 self.camera_info_var.set(info_text)
-                self.camera_info_label.config(foreground="blue")
+
+                # Set color based on connection status
+                if self.camera_connected:
+                    self.camera_info_label.config(foreground="blue")
+                else:
+                    self.camera_info_label.config(foreground="gray")
             else:
                 self.camera_info_var.set("Camera: Legacy mode")
                 self.camera_info_label.config(foreground="gray")
@@ -644,6 +753,15 @@ class SVGRoutesPanel:
         """Toggle between registration and manual transform mode"""
         try:
             use_registration = self.svg_use_registration_var.get()
+
+            # Check if registration is available when trying to use it
+            if use_registration and not self.registration_available:
+                self.log("Registration transform not available - switching to manual", "warning")
+                self.svg_use_registration_var.set(False)
+                use_registration = False
+                messagebox.showwarning("Registration Not Available",
+                                       "Registration transform is not available.\nUsing manual transform instead.")
+
             self.routes_overlay.set_use_registration_transform(use_registration)
 
             if use_registration:
@@ -745,9 +863,8 @@ class SVGRoutesPanel:
         self.auto_scale_check.config(state='disabled')
         self.pixels_per_mm_spin.config(state='disabled')
 
-        if hasattr(self, 'quick_scale_buttons'):
-            for btn in self.quick_scale_buttons:
-                btn.config(state='disabled')
+        for btn in self.quick_scale_buttons:
+            btn.config(state='disabled')
 
         # Disable debug controls (but don't change their state)
         # Users should be able to toggle debug settings even without routes
@@ -788,6 +905,8 @@ class SVGRoutesPanel:
                 if hasattr(self.routes_overlay, 'refresh_transformation'):
                     self.routes_overlay.refresh_transformation()
 
+                self.log("SVG overlay refreshed")
+
         except Exception as e:
             self.log(f"Error refreshing overlay: {e}", "error")
 
@@ -808,3 +927,20 @@ class SVGRoutesPanel:
 
         except Exception as e:
             self.log(f"Error updating camera position: {e}", "error")
+
+    def get_panel_status(self):
+        """Get current panel status for external queries"""
+        try:
+            return {
+                'routes_loaded': self.routes_loaded,
+                'routes_visible': self.is_visible(),
+                'routes_count': self.get_routes_count(),
+                'camera_connected': self.camera_connected,
+                'registration_available': self.registration_available,
+                'using_registration_transform': self.svg_use_registration_var.get(),
+                'auto_scale_enabled': self.auto_scale_var.get(),
+                'pixels_per_mm': self.pixels_per_mm_var.get()
+            }
+        except Exception as e:
+            self.log(f"Error getting panel status: {e}", "error")
+            return {'error': str(e)}

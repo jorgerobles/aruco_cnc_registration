@@ -1,6 +1,6 @@
 """
-Updated Main Window using separate debug panel
-Shows the clean separation of concerns with dedicated debug panel
+Updated Main Window using event-aware panels
+Shows clean separation of concerns with event-driven architecture
 """
 
 import time
@@ -92,21 +92,9 @@ class RegistrationGUI:
             # Start camera feed automatically
             self.start_camera_feed()
 
-            # Enable camera-dependent controls
-            if hasattr(self, 'calibration_panel'):
-                self.calibration_panel.on_camera_connected()
-            if hasattr(self, 'registration_panel'):
-                self.registration_panel.on_camera_connected()
-
         else:
             self.log("Camera connection failed", "error")
             self.status_var.set("Camera connection failed")
-
-            # Disable camera-dependent controls
-            if hasattr(self, 'calibration_panel'):
-                self.calibration_panel.on_camera_disconnected()
-            if hasattr(self, 'registration_panel'):
-                self.registration_panel.on_camera_disconnected()
 
     @event_handler(CameraEvents.DISCONNECTED, EventPriority.HIGH)
     def _on_camera_disconnected(self):
@@ -117,12 +105,6 @@ class RegistrationGUI:
         # Stop camera feed
         if self.camera_display:
             self.camera_display.stop_feed()
-
-        # Disable camera-dependent controls
-        if hasattr(self, 'calibration_panel'):
-            self.calibration_panel.on_camera_disconnected()
-        if hasattr(self, 'registration_panel'):
-            self.registration_panel.on_camera_disconnected()
 
     @event_handler(CameraEvents.ERROR)
     def _on_camera_error(self, error_message: str):
@@ -165,17 +147,13 @@ class RegistrationGUI:
     @event_handler(GRBLEvents.STATUS_CHANGED)
     def _on_grbl_status_changed(self, status: str):
         """Handle GRBL status changes"""
-        self.log(f"GRBL Status: {status}", "info")
-        # Update status display if needed
-        if hasattr(self, 'machine_panel'):
-            # Update machine panel status if it has such functionality
-            pass
+        # Don't log status changes here to avoid spam - panels handle their own updates
+        pass
 
     @event_handler(GRBLEvents.POSITION_CHANGED)
     def _on_grbl_position_changed(self, position: List[float]):
         """Handle GRBL position changes"""
-        # Only log significant position changes to avoid spam
-        # self.log(f"Position: X{position[0]:.3f} Y{position[1]:.3f} Z{position[2]:.3f}", "info")
+        # Don't log position changes here to avoid spam - panels handle their own updates
         pass
 
     @event_handler(RegistrationEvents.POINT_ADDED, EventPriority.HIGH)
@@ -189,10 +167,6 @@ class RegistrationGUI:
             f"Calibration point {point_index + 1} added at X{machine_pos[0]:.3f} Y{machine_pos[1]:.3f} Z{machine_pos[2]:.3f}")
         self.status_var.set(f"Calibration points: {total_points}")
 
-        # Update registration panel display
-        if hasattr(self, 'registration_panel'):
-            self.registration_panel.update_point_list()
-
     @event_handler(RegistrationEvents.COMPUTED, EventPriority.HIGH)
     def _on_registration_computed(self, computation_data: dict):
         """Handle successful registration computation"""
@@ -202,14 +176,20 @@ class RegistrationGUI:
         self.log(f"Registration computed successfully with {point_count} points. RMS error: {error:.4f}")
         self.status_var.set(f"Registration complete - Error: {error:.4f}")
 
-        # Update UI to show registration is ready
-        if hasattr(self, 'registration_panel'):
-            self.registration_panel.on_registration_computed(error)
-
     @event_handler(RegistrationEvents.ERROR, EventPriority.HIGH)
     def _on_registration_error(self, error_message: str):
         """Handle registration errors"""
         self.log(f"Registration error: {error_message}", "error")
+
+    @event_handler(ApplicationEvents.STARTUP)
+    def _on_app_startup(self):
+        """Handle application startup event"""
+        self.log("Application started successfully", "info")
+
+    @event_handler(ApplicationEvents.SHUTDOWN)
+    def _on_app_shutdown(self):
+        """Handle application shutdown event"""
+        self.log("Application shutdown initiated", "info")
 
     def setup_gui(self):
         """Setup the main GUI layout"""
@@ -260,21 +240,22 @@ class RegistrationGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Create control panels - PASS None AS LOGGER to avoid circular dependency
+        # Create control panels - Pass the main window's log method as logger
+        # All panels are now event-aware and will auto-register their event handlers
         self.connection_panel = ConnectionPanel(
-            scrollable_frame, self.grbl_controller, self.camera_manager, None  # Changed
+            scrollable_frame, self.grbl_controller, self.camera_manager, self.log
         )
 
         self.calibration_panel = CalibrationPanel(
-            scrollable_frame, self.camera_manager, None  # Changed
+            scrollable_frame, self.camera_manager, self.log
         )
 
         self.machine_panel = MachineControlPanel(
-            scrollable_frame, self.grbl_controller, None  # Changed
+            scrollable_frame, self.grbl_controller, self.log
         )
 
         self.registration_panel = RegistrationPanel(
-            scrollable_frame, self.registration_manager, None  # Changed
+            scrollable_frame, self.registration_manager, self.log
         )
 
         # Set up registration panel callbacks
@@ -316,13 +297,10 @@ class RegistrationGUI:
 
     def setup_debug_panel(self, parent):
         """Setup debug panel using the dedicated DebugPanel class"""
-        # Create the debug panel instance - PASS None AS LOGGER to avoid circular dependency
+        # Create the debug panel instance - Pass the main window's log method as logger
         self.debug_panel = DebugPanel(
-            parent, self.grbl_controller, self.camera_manager, None  # Changed
+            parent, self.grbl_controller, self.camera_manager, self.log
         )
-
-        # Set event broker reference for statistics
-        self.debug_panel.set_event_broker(self._event_broker)
 
     def capture_point(self):
         """Capture calibration point (callback for registration panel)"""
@@ -338,11 +316,8 @@ class RegistrationGUI:
                 self.log("No marker detected in current frame", "error")
                 return
 
-            # Add to registration manager
+            # Add to registration manager - this will emit events automatically
             self.registration_manager.add_calibration_point(machine_pos, tvec, norm_pos)
-
-            # Update display
-            self.registration_panel.add_point_to_list(machine_pos)
 
             point_count = self.registration_manager.get_calibration_points_count()
             self.status_var.set(f"Captured point {point_count}")
@@ -424,6 +399,92 @@ class RegistrationGUI:
             self.camera_display.stop_feed()
             self.log("Camera feed stopped", "info")
 
+    def get_application_status(self):
+        """Get comprehensive application status for monitoring/debugging"""
+        try:
+            status = {
+                'timestamp': time.time(),
+                'grbl': {
+                    'connected': self.grbl_controller.is_connected if self.grbl_controller else False,
+                    'status': None,
+                    'position': None
+                },
+                'camera': {
+                    'connected': self.camera_manager.is_connected if self.camera_manager else False,
+                    'feed_active': False
+                },
+                'registration': {
+                    'points': 0,
+                    'computed': False,
+                    'error': None
+                },
+                'svg_routes': {
+                    'loaded': False,
+                    'visible': False,
+                    'count': 0
+                }
+            }
+
+            # Get GRBL status
+            if self.grbl_controller and self.grbl_controller.is_connected:
+                try:
+                    status['grbl']['status'] = self.grbl_controller.get_status()
+                    status['grbl']['position'] = self.grbl_controller.get_position()
+                except:
+                    pass
+
+            # Get camera status
+            if self.camera_display:
+                status['camera']['feed_active'] = hasattr(self.camera_display, '_feed_running') and self.camera_display._feed_running
+
+            # Get registration status
+            if self.registration_manager:
+                try:
+                    status['registration']['points'] = self.registration_manager.get_calibration_points_count()
+                    status['registration']['computed'] = self.registration_manager.is_registered()
+                    if hasattr(self.registration_manager, 'get_registration_error'):
+                        status['registration']['error'] = self.registration_manager.get_registration_error()
+                except:
+                    pass
+
+            # Get SVG routes status
+            if self.svg_panel:
+                try:
+                    panel_status = self.svg_panel.get_panel_status()
+                    status['svg_routes']['loaded'] = panel_status.get('routes_loaded', False)
+                    status['svg_routes']['visible'] = panel_status.get('routes_visible', False)
+                    status['svg_routes']['count'] = panel_status.get('routes_count', 0)
+                except:
+                    pass
+
+            return status
+
+        except Exception as e:
+            self.log(f"Error getting application status: {e}", "error")
+            return {'error': str(e)}
+
+    def refresh_all_panels(self):
+        """Refresh all panels to ensure UI consistency"""
+        try:
+            self.log("Refreshing all panels...", "info")
+
+            # Refresh registration panel
+            if self.registration_panel:
+                self.registration_panel.update_point_list()
+
+            # Refresh SVG panel
+            if self.svg_panel:
+                self.svg_panel.refresh_overlay()
+
+            # Update debug panel camera status
+            if self.debug_panel:
+                self.debug_panel.update_camera_status()
+
+            self.log("All panels refreshed", "info")
+
+        except Exception as e:
+            self.log(f"Error refreshing panels: {e}", "error")
+
     def on_closing(self):
         """Handle application closing"""
         self.log("Application closing", "info")
@@ -442,22 +503,3 @@ class RegistrationGUI:
         self.grbl_controller.disconnect()
 
         self.root.destroy()
-
-
-# Example of how to run the application with the improved controller
-if __name__ == "__main__":
-    import tkinter as tk
-
-    def main():
-        root = tk.Tk()
-        app = RegistrationGUI(root)
-
-        # Set up window close handler
-        root.protocol("WM_DELETE_WINDOW", app.on_closing)
-
-        try:
-            root.mainloop()
-        except KeyboardInterrupt:
-            app.on_closing()
-
-    main()

@@ -1,7 +1,7 @@
 """
 Fixed Registration Manager
-Handles camera-to-machine coordinate transformation logic with dimension fixes
-Enhanced with @event_aware decorator
+Handles camera-to-machine coordinate transformation logic with clean event handling
+Eliminates duplicate logging and improper use of ERROR events for success messages
 """
 
 import numpy as np
@@ -11,7 +11,7 @@ from services.event_broker import event_aware, RegistrationEvents
 
 @event_aware()
 class RegistrationManager:
-    """Manages camera-to-machine coordinate registration with event notifications"""
+    """Manages camera-to-machine coordinate registration with clean event notifications"""
 
     def __init__(self):
         self.calibration_points = []  # [(machine_pos, camera_tvec, norm_pos), ...]
@@ -174,11 +174,6 @@ class RegistrationManager:
                 machine_points.append(machine_3d)
                 camera_points.append(camera_3d)
 
-            # Debug logging
-            self.emit(RegistrationEvents.ERROR, f"Computing registration with {len(machine_points)} points")
-            self.emit(RegistrationEvents.ERROR, f"Machine points shape: {[p.shape for p in machine_points[:2]]}")
-            self.emit(RegistrationEvents.ERROR, f"Camera points shape: {[p.shape for p in camera_points[:2]]}")
-
             # Compute rigid transformation
             self.transformation_matrix, self.translation_vector = self._compute_rigid_transform(
                 camera_points, machine_points)
@@ -212,9 +207,6 @@ class RegistrationManager:
             A_array = np.array([self._ensure_3d(point) for point in A])  # Shape: (N, 3)
             B_array = np.array([self._ensure_3d(point) for point in B])  # Shape: (N, 3)
 
-            self.emit(RegistrationEvents.ERROR, f"A_array shape: {A_array.shape}")
-            self.emit(RegistrationEvents.ERROR, f"B_array shape: {B_array.shape}")
-
             if A_array.shape[0] != B_array.shape[0]:
                 raise ValueError(f"Point count mismatch: A has {A_array.shape[0]}, B has {B_array.shape[0]}")
 
@@ -225,8 +217,6 @@ class RegistrationManager:
             centroid_A = np.mean(A_array, axis=0)  # Shape: (3,)
             centroid_B = np.mean(B_array, axis=0)  # Shape: (3,)
 
-            self.emit(RegistrationEvents.ERROR, f"Centroids - A: {centroid_A.shape}, B: {centroid_B.shape}")
-
             # Center the points
             AA = A_array - centroid_A  # Shape: (N, 3)
             BB = B_array - centroid_B  # Shape: (N, 3)
@@ -234,12 +224,8 @@ class RegistrationManager:
             # Compute cross-covariance matrix H = AA.T @ BB
             H = AA.T @ BB  # Shape: (3, 3)
 
-            self.emit(RegistrationEvents.ERROR, f"H matrix shape: {H.shape}")
-
             # SVD decomposition
             U, S, Vt = np.linalg.svd(H)
-
-            self.emit(RegistrationEvents.ERROR, f"SVD shapes - U: {U.shape}, S: {S.shape}, Vt: {Vt.shape}")
 
             # Compute rotation matrix
             R = Vt.T @ U.T  # Shape: (3, 3)
@@ -252,13 +238,10 @@ class RegistrationManager:
             # Compute translation
             t = centroid_B - R @ centroid_A  # Shape: (3,)
 
-            self.emit(RegistrationEvents.ERROR, f"Final R shape: {R.shape}, t shape: {t.shape}")
-
             return R, t
 
         except Exception as e:
-            self.emit(RegistrationEvents.ERROR, f"Rigid transform computation error: {e}")
-            raise
+            raise RuntimeError(f"Rigid transform computation error: {e}")
 
     def transform_point(self, camera_point: np.ndarray) -> np.ndarray:
         """Transform a point from camera coordinates to machine coordinates"""
@@ -312,7 +295,7 @@ class RegistrationManager:
         return (self.transformation_matrix is not None and
                 self.translation_vector is not None)
 
-    def save_registration(self, filename: str):
+    def save_registration(self, filename: str) -> bool:
         """Save registration data to file"""
         try:
             if not self.is_registered():
@@ -333,30 +316,30 @@ class RegistrationManager:
             save_data = {
                 'rotation_matrix': self.transformation_matrix,
                 'translation_vector': self.translation_vector,
-                'machine_positions': np.array(machine_positions),  # Convert to consistent array
-                'camera_positions': np.array(camera_positions),    # Convert to consistent array
-                'norm_positions': np.array(norm_positions),        # Convert to consistent array
+                'machine_positions': np.array(machine_positions),
+                'camera_positions': np.array(camera_positions),
+                'norm_positions': np.array(norm_positions),
                 'registration_error': self._registration_error,
                 'point_count': len(self.calibration_points)
             }
 
             np.savez(filename, **save_data)
 
+            # Emit save success event (no longer using ERROR for success messages)
             self.emit(RegistrationEvents.SAVED, {
                 'filename': filename,
                 'point_count': len(self.calibration_points),
                 'error': self._registration_error
             })
 
-            self.emit(RegistrationEvents.ERROR, f"✅ Registration saved to {filename}")
+            return True
 
         except Exception as e:
             error_msg = f"Failed to save registration: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
-            # Don't re-raise to prevent cascade failures
             return False
 
-    def load_registration(self, filename: str):
+    def load_registration(self, filename: str) -> bool:
         """Load registration data from file"""
         try:
             data = np.load(filename, allow_pickle=True)
@@ -387,18 +370,18 @@ class RegistrationManager:
             if self._registration_error is None:
                 self._registration_error = self._calculate_registration_error()
 
+            # Emit load success event (no longer using ERROR for success messages)
             self.emit(RegistrationEvents.LOADED, {
                 'filename': filename,
                 'point_count': len(self.calibration_points),
                 'error': self._registration_error
             })
 
-            self.emit(RegistrationEvents.ERROR, f"✅ Registration loaded from {filename}")
+            return True
 
         except Exception as e:
             error_msg = f"Failed to load registration: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
-            # Don't re-raise to prevent cascade failures
             return False
 
     def get_registration_error(self) -> Optional[float]:
@@ -519,7 +502,7 @@ class RegistrationManager:
             error_msg = f"Failed to reset registration: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
 
-    def save_registration_json(self, filename: str):
+    def save_registration_json(self, filename: str) -> bool:
         """Save registration data to JSON file (human-readable backup)"""
         try:
             import json
@@ -552,7 +535,6 @@ class RegistrationManager:
             with open(filename, 'w') as f:
                 json.dump(save_data, f, indent=2)
 
-            self.emit(RegistrationEvents.ERROR, f"✅ Registration saved to JSON: {filename}")
             return True
 
         except Exception as e:
@@ -560,7 +542,7 @@ class RegistrationManager:
             self.emit(RegistrationEvents.ERROR, error_msg)
             return False
 
-    def load_registration_json(self, filename: str):
+    def load_registration_json(self, filename: str) -> bool:
         """Load registration data from JSON file"""
         try:
             import json
@@ -586,7 +568,6 @@ class RegistrationManager:
                 'error': self._registration_error
             })
 
-            self.emit(RegistrationEvents.ERROR, f"✅ Registration loaded from JSON: {filename}")
             return True
 
         except Exception as e:
@@ -596,16 +577,25 @@ class RegistrationManager:
 
     def debug_calibration_points(self):
         """Debug method to print calibration point information"""
-        self.emit(RegistrationEvents.ERROR, f"=== CALIBRATION POINTS DEBUG ===")
-        self.emit(RegistrationEvents.ERROR, f"Total points: {len(self.calibration_points)}")
+        # Create a special debug info event instead of misusing ERROR
+        debug_info = {
+            'total_points': len(self.calibration_points),
+            'points_detail': []
+        }
 
         for i, (machine_pos, camera_tvec, norm_pos) in enumerate(self.calibration_points):
-            self.emit(RegistrationEvents.ERROR, f"Point {i}:")
-            self.emit(RegistrationEvents.ERROR, f"  Machine: {machine_pos} (shape: {machine_pos.shape})")
-            self.emit(RegistrationEvents.ERROR, f"  Camera:  {camera_tvec} (shape: {camera_tvec.shape})")
-            self.emit(RegistrationEvents.ERROR, f"  Norm:    {norm_pos}")
+            point_detail = {
+                'index': i,
+                'machine_pos': machine_pos.tolist(),
+                'machine_shape': machine_pos.shape,
+                'camera_tvec': camera_tvec.tolist(),
+                'camera_shape': camera_tvec.shape,
+                'norm_pos': norm_pos
+            }
+            debug_info['points_detail'].append(point_detail)
 
-        self.emit(RegistrationEvents.ERROR, f"=== END DEBUG ===")
+        # Emit as a debug info event rather than error
+        self.emit(RegistrationEvents.DEBUG_INFO, debug_info)
 
     def get_transformation_info(self) -> dict:
         """Get detailed information about the current transformation"""

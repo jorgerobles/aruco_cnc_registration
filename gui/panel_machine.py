@@ -11,7 +11,11 @@ import threading
 import time
 import math
 
+from services.event_broker import (event_aware, event_handler, EventPriority,
+                                   GRBLEvents)
 
+
+@event_aware()
 class MachineControlPanel:
     """Machine control panel with integrated concentric ring jogging interface"""
 
@@ -63,38 +67,72 @@ class MachineControlPanel:
 
         self._setup_widgets()
 
-        # Listen to GRBL events for automatic updates
-        if hasattr(self.grbl_controller, 'listen'):
-            from services.event_broker import GRBLEvents
-            self.grbl_controller.listen(GRBLEvents.POSITION_CHANGED, self._on_position_changed)
-            self.grbl_controller.listen(GRBLEvents.STATUS_CHANGED, self._on_status_changed)
-            self.grbl_controller.listen(GRBLEvents.COMMAND_SENT, self._on_command_sent)
-            self.grbl_controller.listen(GRBLEvents.RESPONSE_RECEIVED, self._on_response_received)
-
     def log(self, message: str, level: str = "info"):
         """Log message if logger is available"""
         if self.logger:
             self.logger(message, level)
 
+    # Event handlers using decorators
+    @event_handler(GRBLEvents.POSITION_CHANGED, EventPriority.HIGH)
     def _on_position_changed(self, position):
         """Handle position change events from GRBL"""
         self.position_label.config(
             text=f"Position: X{position[0]:.3f} Y{position[1]:.3f} Z{position[2]:.3f}"
         )
+        # Only log position changes occasionally to avoid spam
+        if hasattr(self, '_last_position_log_time'):
+            now = time.time()
+            if now - self._last_position_log_time < 2.0:  # Log at most every 2 seconds
+                return
+        self._last_position_log_time = time.time()
         self.log(f"Position updated: X{position[0]:.3f} Y{position[1]:.3f} Z{position[2]:.3f}")
 
+    @event_handler(GRBLEvents.STATUS_CHANGED, EventPriority.HIGH)
     def _on_status_changed(self, status):
         """Handle status change events from GRBL"""
         self.status_label.config(text=f"Status: {status}")
         self.log(f"Status changed: {status}")
 
-    def _on_command_sent(self, command):
-        """Handle command sent events"""
-        self.log(f"→ SENT: {command}", "sent")
+    @event_handler(GRBLEvents.CONNECTED)
+    def _on_grbl_connected(self, success: bool):
+        """Handle GRBL connection events"""
+        if success:
+            self.log("GRBL connected - updating position", "info")
+            # Update position display when connected
+            self.update_position()
+        else:
+            self.position_label.config(text="Position: Connection failed")
+            self.status_label.config(text="Status: Connection failed")
 
-    def _on_response_received(self, response):
-        """Handle response received events"""
-        self.log(f"← RECV: {response}", "received")
+    @event_handler(GRBLEvents.DISCONNECTED)
+    def _on_grbl_disconnected(self):
+        """Handle GRBL disconnection events"""
+        self.position_label.config(text="Position: Not connected")
+        self.status_label.config(text="Status: Disconnected")
+        self.log("GRBL disconnected", "info")
+
+    @event_handler(GRBLEvents.ERROR)
+    def _on_grbl_error(self, error_message: str):
+        """Handle GRBL errors"""
+        self.log(f"GRBL Error: {error_message}", "error")
+        # Reset jog status on errors
+        self._reset_jog_status()
+
+    @event_handler(GRBLEvents.COMMAND_SENT)
+    def _on_command_sent(self, command: str):
+        """Handle GRBL commands being sent"""
+        # Only log manual commands to avoid spam from automatic ones
+        if hasattr(self, '_manual_command_sent') and self._manual_command_sent:
+            self.log(f"→ SENT: {command}", "sent")
+            self._manual_command_sent = False
+
+    @event_handler(GRBLEvents.RESPONSE_RECEIVED)
+    def _on_response_received(self, response: str):
+        """Handle GRBL responses"""
+        # Only log responses to manual commands to avoid spam
+        if hasattr(self, '_log_next_response') and self._log_next_response:
+            self.log(f"← RECV: {response}", "received")
+            self._log_next_response = False
 
     def _setup_widgets(self):
         """Setup all control widgets"""
@@ -788,8 +826,10 @@ class MachineControlPanel:
                 self.log("❌ GRBL not connected", "error")
                 return
 
-            # Send manual status query
+            # Send manual status query and log responses
             self.log("📊 Requesting detailed status...")
+            self._manual_command_sent = True
+            self._log_next_response = True
             responses = self.grbl_controller.send_command("?")
 
             for response in responses:
@@ -840,111 +880,3 @@ class MachineControlPanel:
         """Legacy jog method - redirects to safe jog"""
         self.log("⚠️ Using legacy jog method - redirecting to safe jog")
         self.jog_safe(x, y, z)
-
-
-# Usage example and integration helper
-def create_enhanced_machine_panel(parent, grbl_controller, logger=None):
-    """
-    Helper function to create the enhanced machine control panel
-
-    Args:
-        parent: Tkinter parent widget
-        grbl_controller: Instance of GRBLController with event support
-        logger: Optional logging function
-
-    Returns:
-        EnhancedMachineControlPanel instance
-    """
-    return EnhancedMachineControlPanel(parent, grbl_controller, logger)
-
-
-# Demo/Test function
-def demo_enhanced_panel():
-    """Demo function to test the enhanced panel"""
-    import tkinter as tk
-    from tkinter import scrolledtext
-
-    # Mock GRBL controller for testing
-    class MockGRBLController:
-        def __init__(self):
-            self.is_connected = True
-            self.current_position = [0.0, 0.0, 0.0]
-            self.current_status = "Idle"
-
-        def listen(self, event_type, callback):
-            pass
-
-        def get_position(self):
-            return self.current_position.copy()
-
-        def get_status(self):
-            return self.current_status
-
-        def move_relative(self, x, y, z, feed_rate):
-            print(f"Mock jog: X{x:+.3f} Y{y:+.3f} Z{z:+.3f} @ F{feed_rate}")
-            self.current_position[0] += x
-            self.current_position[1] += y
-            self.current_position[2] += z
-            return ["ok"]
-
-        def home(self):
-            print("Mock homing")
-            self.current_position = [0.0, 0.0, 0.0]
-            return True
-
-        def move_to(self, x, y, z, feed_rate):
-            print(f"Mock move to: X{x} Y{y} Z{z} @ F{feed_rate}")
-            return True
-
-        def emergency_stop(self):
-            print("Mock emergency stop")
-            return True
-
-        def resume(self):
-            print("Mock resume")
-            return True
-
-        def reset(self):
-            print("Mock reset")
-            return True
-
-        def send_command(self, cmd):
-            print(f"Mock command: {cmd}")
-            return ["ok"]
-
-        def get_connection_info(self):
-            return {
-                'is_connected': True,
-                'status': 'Mock Controller',
-                'position': self.current_position
-            }
-
-    # Create demo window
-    root = tk.Tk()
-    root.title("Enhanced Machine Control Panel Demo")
-    root.geometry("1000x800")
-
-    # Create log display
-    log_frame = tk.Frame(root)
-    log_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
-
-    tk.Label(log_frame, text="Log Output:", font=('Arial', 10, 'bold')).pack(anchor=tk.W)
-    log_text = scrolledtext.ScrolledText(log_frame, height=8, width=80)
-    log_text.pack(fill=tk.X)
-
-    def logger(message, level="info"):
-        log_text.insert(tk.END, f"[{level.upper()}] {message}\n")
-        log_text.see(tk.END)
-
-    # Create mock controller and panel
-    mock_controller = MockGRBLController()
-    panel = create_enhanced_machine_panel(root, mock_controller, logger)
-
-    logger("Enhanced Machine Control Panel Demo Started", "info")
-    logger("This is a mock controller for testing the interface", "info")
-
-    root.mainloop()
-
-
-if __name__ == "__main__":
-    demo_enhanced_panel()

@@ -1,5 +1,5 @@
 """
-Debug Panel - Comprehensive debug console and controls
+Debug Panel - Comprehensive debug console and controls with event awareness
 Handles all debug functionality including console, manual commands, and status displays
 """
 
@@ -8,7 +8,11 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 from typing import Callable, Optional
 
+from services.event_broker import (event_aware, event_handler, EventPriority,
+                                   CameraEvents, GRBLEvents, RegistrationEvents, ApplicationEvents)
 
+
+@event_aware()
 class DebugPanel:
     """Debug console and controls panel for GRBL Camera Registration application"""
 
@@ -26,22 +30,111 @@ class DebugPanel:
         self.debug_var = tk.BooleanVar(value=True)
         self.manual_cmd_var = tk.StringVar()
 
-        # Event broker reference (will be set by main window)
-        self._event_broker = None
-
         self._setup_debug_panel()
 
-    def set_event_broker(self, event_broker):
-        """Set the event broker reference for statistics"""
-        self._event_broker = event_broker
+    # Event handlers for all event types
+    @event_handler(GRBLEvents.CONNECTED)
+    def _on_grbl_connected(self, success: bool):
+        """Handle GRBL connection events"""
+        if success:
+            self.log("GRBL: Connected successfully", "info")
+        else:
+            self.log("GRBL: Connection failed", "error")
+
+    @event_handler(GRBLEvents.DISCONNECTED)
+    def _on_grbl_disconnected(self):
+        """Handle GRBL disconnection events"""
+        self.log("GRBL: Disconnected", "info")
+
+    @event_handler(GRBLEvents.STATUS_CHANGED)
+    def _on_grbl_status_changed(self, status: str):
+        """Handle GRBL status changes"""
+        self.log(f"GRBL: Status changed to {status}", "info")
+
+    @event_handler(GRBLEvents.POSITION_CHANGED)
+    def _on_grbl_position_changed(self, position: list):
+        """Handle GRBL position changes - filtered to avoid spam"""
+        # Only log position changes occasionally to avoid spam
+        if hasattr(self, '_last_position_log'):
+            now = time.time()
+            if now - self._last_position_log < 2.0:  # Log at most every 2 seconds
+                return
+        self._last_position_log = time.time()
+        self.log(f"GRBL: Position X{position[0]:.3f} Y{position[1]:.3f} Z{position[2]:.3f}", "info")
+
+    @event_handler(GRBLEvents.ERROR)
+    def _on_grbl_error(self, error_message: str):
+        """Handle GRBL errors with filtering"""
+        self.log_grbl_event(error_message, "error")
+
+    @event_handler(GRBLEvents.COMMAND_SENT)
+    def _on_grbl_command_sent(self, command: str):
+        """Handle GRBL commands being sent"""
+        self.log(f"GRBL SENT: {command}", "sent")
+
+    @event_handler(GRBLEvents.RESPONSE_RECEIVED)
+    def _on_grbl_response_received(self, response: str):
+        """Handle GRBL responses"""
+        self.log(f"GRBL RECV: {response}", "received")
+
+    @event_handler(CameraEvents.CONNECTED)
+    def _on_camera_connected(self, success: bool):
+        """Handle camera connection events"""
+        if success:
+            self.log("Camera: Connected successfully", "info")
+        else:
+            self.log("Camera: Connection failed", "error")
+
+    @event_handler(CameraEvents.DISCONNECTED)
+    def _on_camera_disconnected(self):
+        """Handle camera disconnection events"""
+        self.log("Camera: Disconnected", "info")
+
+    @event_handler(CameraEvents.ERROR)
+    def _on_camera_error(self, error_message: str):
+        """Handle camera errors"""
+        self.log(f"Camera: {error_message}", "error")
+
+    @event_handler(CameraEvents.CALIBRATION_LOADED)
+    def _on_camera_calibrated(self, file_path: str):
+        """Handle camera calibration loaded"""
+        self.log(f"Camera: Calibration loaded from {file_path}", "info")
+
+    @event_handler(RegistrationEvents.POINT_ADDED)
+    def _on_registration_point_added(self, point_data: dict):
+        """Handle registration point added"""
+        point_index = point_data['point_index']
+        total_points = point_data['total_points']
+        machine_pos = point_data['machine_pos']
+        self.log(f"Registration: Point {point_index + 1} added at X{machine_pos[0]:.3f} Y{machine_pos[1]:.3f} Z{machine_pos[2]:.3f}", "info")
+
+    @event_handler(RegistrationEvents.COMPUTED)
+    def _on_registration_computed(self, computation_data: dict):
+        """Handle registration computation"""
+        point_count = computation_data['point_count']
+        error = computation_data['error']
+        self.log(f"Registration: Computed with {point_count} points, RMS error: {error:.4f}", "info")
+
+    @event_handler(RegistrationEvents.ERROR)
+    def _on_registration_error(self, error_message: str):
+        """Handle registration errors"""
+        self.log(f"Registration: {error_message}", "error")
+
+    @event_handler(ApplicationEvents.STARTUP)
+    def _on_app_startup(self):
+        """Handle application startup"""
+        self.log("Application: Starting up", "info")
+
+    @event_handler(ApplicationEvents.SHUTDOWN)
+    def _on_app_shutdown(self):
+        """Handle application shutdown"""
+        self.log("Application: Shutting down", "info")
 
     def _setup_debug_panel(self):
         """Setup debug console panel with integrated debug controls"""
         # Create main frame for debug panel content
         main_debug_frame = ttk.Frame(self.parent)
         main_debug_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-
 
         # Console controls row (integrated into console frame)
         console_controls_frame = ttk.Frame(main_debug_frame)
@@ -150,7 +243,7 @@ class DebugPanel:
     def show_event_stats(self):
         """Show event broker statistics"""
         try:
-            if self._event_broker is None:
+            if not hasattr(self, '_event_broker') or self._event_broker is None:
                 self.log("Event broker not available", "warning")
                 return
 
@@ -180,13 +273,14 @@ class DebugPanel:
                 self.log("GRBL not connected", "error")
                 return
 
-            self.log(f"SENT: {command}", "sent")
+            # Manual commands don't go through events, log directly
+            self.log(f"Manual SENT: {command}", "sent")
             response = self.grbl_controller.send_command(command)
             for line in response:
-                self.log(f"RECV: {line}", "received")
+                self.log(f"Manual RECV: {line}", "received")
             self.manual_cmd_var.set("")  # Clear entry
         except Exception as e:
-            self.log(f"ERROR: {e}", "error")
+            self.log(f"Manual command error: {e}", "error")
 
     def send_quick_command(self, command):
         """Send a quick command by setting it in the entry field"""
@@ -314,3 +408,11 @@ class DebugPanel:
             stats['console_lines'] = len(content.split('\n')) - 1  # -1 for the last empty line
 
         return stats
+
+    def update_camera_status(self):
+        """Update camera status display (called from main window)"""
+        if self.camera_manager and self.camera_manager.is_connected:
+            info = self.camera_manager.get_camera_info()
+            self.log(f"Camera status update: ID={info['camera_id']}, Resolution={info['width']}x{info['height']}, Calibrated={info['calibrated']}", "info")
+        else:
+            self.log("Camera status update: Disconnected", "info")

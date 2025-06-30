@@ -1,7 +1,6 @@
 """
-Updated Connection Panel with debug controls removed
-Debug controls are now moved to the debug console panel in main window
-This panel now focuses only on device connections and diagnostics
+Updated Connection Panel with event awareness
+Focuses only on device connections and diagnostics without adding new features
 """
 
 import tkinter as tk
@@ -12,7 +11,11 @@ import threading
 import time
 from typing import Callable, Optional
 
+from services.event_broker import (event_aware, event_handler, EventPriority,
+                                   CameraEvents, GRBLEvents)
 
+
+@event_aware()
 class ConnectionPanel:
     """Connection controls focused on device connections and diagnostics"""
 
@@ -37,21 +40,15 @@ class ConnectionPanel:
         self._setup_widgets()
         self._refresh_ports()
 
-        # Listen to GRBL events to update UI
-        if hasattr(self.grbl_controller, 'listen'):
-            # New event-aware controller
-            from services.event_broker import GRBLEvents
-            self.grbl_controller.listen(GRBLEvents.CONNECTED, self._on_grbl_connection_changed)
-            self.grbl_controller.listen(GRBLEvents.DISCONNECTED, self._on_grbl_disconnected)
-            self.grbl_controller.listen(GRBLEvents.ERROR, self._on_grbl_error)
-
     def log(self, message: str, level: str = "info"):
         """Log message if logger is available"""
         if self.logger:
             self.logger(message, level)
         print(f"[{level.upper()}] {message}")  # Also print to console
 
-    def _on_grbl_connection_changed(self, success: bool):
+    # Event handlers using decorators
+    @event_handler(GRBLEvents.CONNECTED, EventPriority.HIGH)
+    def _on_grbl_connected(self, success: bool):
         """Handle GRBL connection status changes"""
         if success:
             self.grbl_status_var.set("Connected")
@@ -62,12 +59,14 @@ class ConnectionPanel:
             self.grbl_connect_btn.config(state=tk.NORMAL)
             self.grbl_disconnect_btn.config(state=tk.DISABLED)
 
+    @event_handler(GRBLEvents.DISCONNECTED)
     def _on_grbl_disconnected(self):
         """Handle GRBL disconnection"""
         self.grbl_status_var.set("Disconnected")
         self.grbl_connect_btn.config(state=tk.NORMAL)
         self.grbl_disconnect_btn.config(state=tk.DISABLED)
 
+    @event_handler(GRBLEvents.ERROR)
     def _on_grbl_error(self, error_message: str):
         """Handle GRBL errors/debug messages"""
         # Filter out debug messages from actual errors
@@ -77,6 +76,30 @@ class ConnectionPanel:
         else:
             # Actual error
             self.log(f"GRBL Error: {error_message}", "error")
+
+    @event_handler(CameraEvents.CONNECTED, EventPriority.HIGH)
+    def _on_camera_connected(self, success: bool):
+        """Handle camera connection status changes"""
+        if success:
+            self.camera_status_var.set("Connected")
+            self.camera_connect_btn.config(state=tk.DISABLED)
+            self.camera_disconnect_btn.config(state=tk.NORMAL)
+        else:
+            self.camera_status_var.set("Connection Failed")
+            self.camera_connect_btn.config(state=tk.NORMAL)
+            self.camera_disconnect_btn.config(state=tk.DISABLED)
+
+    @event_handler(CameraEvents.DISCONNECTED)
+    def _on_camera_disconnected(self):
+        """Handle camera disconnection"""
+        self.camera_status_var.set("Disconnected")
+        self.camera_connect_btn.config(state=tk.NORMAL)
+        self.camera_disconnect_btn.config(state=tk.DISABLED)
+
+    @event_handler(CameraEvents.ERROR)
+    def _on_camera_error(self, error_message: str):
+        """Handle camera errors"""
+        self.log(f"Camera Error: {error_message}", "error")
 
     def _setup_widgets(self):
         """Setup connection control widgets with diagnostics"""
@@ -407,9 +430,6 @@ class ConnectionPanel:
         """Handle GRBL connection result in main thread"""
         if success:
             self.log("✅ GRBL connected successfully")
-            self.grbl_status_var.set("Connected")
-            self.grbl_connect_btn.config(state=tk.DISABLED)
-            self.grbl_disconnect_btn.config(state=tk.NORMAL)
         else:
             self.log("❌ Failed to connect to GRBL", "error")
             self.grbl_status_var.set("Connection Failed")
@@ -427,9 +447,6 @@ class ConnectionPanel:
         """Disconnect from GRBL"""
         try:
             self.grbl_controller.disconnect()
-            self.grbl_status_var.set("Disconnected")
-            self.grbl_connect_btn.config(state=tk.NORMAL)
-            self.grbl_disconnect_btn.config(state=tk.DISABLED)
             self.log("GRBL disconnected")
         except Exception as e:
             self.log(f"Error disconnecting GRBL: {e}", "error")
@@ -444,9 +461,6 @@ class ConnectionPanel:
 
             if self.camera_manager.connect():
                 self.log("✅ Camera connected successfully")
-                self.camera_status_var.set("Connected")
-                self.camera_connect_btn.config(state=tk.DISABLED)
-                self.camera_disconnect_btn.config(state=tk.NORMAL)
                 return True
             else:
                 self.log("❌ Failed to connect to camera", "error")
@@ -469,9 +483,6 @@ class ConnectionPanel:
         """Disconnect from camera"""
         try:
             self.camera_manager.disconnect()
-            self.camera_status_var.set("Disconnected")
-            self.camera_connect_btn.config(state=tk.NORMAL)
-            self.camera_disconnect_btn.config(state=tk.DISABLED)
             self.log("Camera disconnected")
         except Exception as e:
             self.log(f"Error disconnecting camera: {e}", "error")
