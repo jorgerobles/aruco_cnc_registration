@@ -37,7 +37,7 @@ class GRBLController:
         self._command_timeouts = {
             '$H': 30.0,      # Homing can take a while
             'G28': 30.0,     # Return to home
-            '?': 1.0,        # Status queries are fast
+            '?': 2.0,        # Status queries are fast
             'G91': 2.0,      # Relative positioning mode
             'G90': 2.0,      # Absolute positioning mode
             'G1': 3.0,       # Linear moves (including jogs)
@@ -390,7 +390,7 @@ class GRBLController:
             # If we have recent position data, use it
             if self._initialization_complete:
                 # Request fresh status update
-                responses = self.send_command("?", custom_timeout=2.0)
+                responses = self.send_command("?", custom_timeout=5.0)
                 # Position is updated via _parse_status_response
                 return self.current_position.copy()
             else:
@@ -404,7 +404,7 @@ class GRBLController:
         """Get current machine status"""
         try:
             # Request status update with short timeout
-            responses = self.send_command("?", custom_timeout=2.0)
+            responses = self.send_command("?", custom_timeout=5.0)
             return self.current_status
         except Exception as e:
             self.emit(GRBLEvents.ERROR, f"Error getting status: {e}")
