@@ -5,7 +5,22 @@ Marker detection moved to MarkerDetectionOverlay
 
 import cv2
 import numpy as np
+import platform
 from services.event_broker import event_aware, CameraEvents
+
+
+def get_optimal_camera_backend():
+    """Get the optimal camera backend for current platform"""
+    system = platform.system().lower()
+
+    if system == "windows":
+        return cv2.CAP_DSHOW
+    elif system == "linux":
+        return cv2.CAP_V4L2
+    elif system == "darwin":  # macOS
+        return cv2.CAP_AVFOUNDATION
+    else:
+        return cv2.CAP_ANY
 
 
 @event_aware()
@@ -28,17 +43,28 @@ class CameraManager:
         return self._is_connected and self.cap is not None and self.cap.isOpened()
 
     def connect(self):
-        """Connect to camera and emit connection event"""
+        """Connect to camera with platform-optimized backend"""
         try:
-            self.cap = cv2.VideoCapture(self.camera_id)
+            # Get optimal backend for this platform
+            optimal_backend = get_optimal_camera_backend()
+
+            # Try optimal backend first
+            self.cap = cv2.VideoCapture(self.camera_id, optimal_backend)
+
+            # If optimal backend fails, fallback to default
+            if not self.cap.isOpened():
+                self.cap = cv2.VideoCapture(self.camera_id)
+
             success = self.cap.isOpened()
 
             if success:
-                # Set resolution to 1280x720
+                # Set resolution
                 rw, rh = self.resolution
-
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, rw)
                 self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, rh)
+
+                # Optimize for speed
+                self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
                 # Test capture to ensure camera is working
                 ret, test_frame = self.cap.read()
