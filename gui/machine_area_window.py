@@ -196,43 +196,73 @@ class MachineAreaWindow:
 
         self.setup_controls(controls_frame)
 
-        # Status frame (bottom)setup
+        # Status frame (bottom)
         status_frame = ttk.Frame(self.window)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=(0, 5))
 
         self.setup_status_display(status_frame)
 
     def setup_controls(self, parent):
-        """Setup enhanced controls with fixed anchors"""
-        super().setup_controls(parent)
+        """Setup control widgets"""
+        # Display toggles
+        ttk.Label(parent, text="Show Elements:").pack(anchor=tk.W, pady=(5, 0))
 
-        # Enhanced display options
-        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
-        ttk.Label(parent, text="Enhanced Features:").pack(anchor=tk.W)
+        self.show_machine_bounds_var = tk.BooleanVar(value=self.show_machine_bounds)
+        ttk.Checkbutton(parent, text="Machine Bounds", variable=self.show_machine_bounds_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
 
-        self.show_route_paths_var = tk.BooleanVar(value=self.show_route_paths)
-        ttk.Checkbutton(parent, text="Route Paths", variable=self.show_route_paths_var,
-                        command=self.on_enhanced_option_changed).pack(anchor=tk.W)
+        self.show_routes_var = tk.BooleanVar(value=self.show_routes)
+        ttk.Checkbutton(parent, text="Routes", variable=self.show_routes_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
 
-        self.show_movement_trail_var = tk.BooleanVar(value=self.show_movement_trail)
-        ttk.Checkbutton(parent, text="Movement Trail", variable=self.show_movement_trail_var,
-                        command=self.on_enhanced_option_changed).pack(anchor=tk.W)  # FIXED: was anchor=tk.X
+        self.show_camera_position_var = tk.BooleanVar(value=self.show_camera_position)
+        ttk.Checkbutton(parent, text="Camera Position", variable=self.show_camera_position_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
 
-        self.animate_movement_var = tk.BooleanVar(value=self.animate_movement)
-        ttk.Checkbutton(parent, text="Animate Movement", variable=self.animate_movement_var,
-                        command=self.on_enhanced_option_changed).pack(anchor=tk.W)
+        self.show_camera_bounds_var = tk.BooleanVar(value=self.show_camera_bounds)
+        ttk.Checkbutton(parent, text="Camera FOV", variable=self.show_camera_bounds_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
 
-        # Trail controls
-        trail_frame = ttk.Frame(parent)
-        trail_frame.pack(fill=tk.X, pady=2)
+        self.show_calibration_points_var = tk.BooleanVar(value=self.show_calibration_points)
+        ttk.Checkbutton(parent, text="Calibration Points", variable=self.show_calibration_points_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
 
-        ttk.Label(trail_frame, text="Trail Length:").pack(side=tk.LEFT)
-        self.trail_length_var = tk.StringVar(value=str(self.max_trail_length))
-        trail_entry = ttk.Entry(trail_frame, textvariable=self.trail_length_var, width=6)
-        trail_entry.pack(side=tk.RIGHT)
-        trail_entry.bind('<Return>', self.on_trail_length_changed)
+        self.show_grid_var = tk.BooleanVar(value=self.show_grid)
+        ttk.Checkbutton(parent, text="Grid", variable=self.show_grid_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
 
-        ttk.Button(parent, text="Clear Trail", command=self.clear_movement_trail).pack(fill=tk.X, pady=2)
+        # Separator
+        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+        # Machine bounds configuration
+        ttk.Label(parent, text="Machine Bounds (mm):").pack(anchor=tk.W, pady=(5, 0))
+
+        bounds_frame = ttk.Frame(parent)
+        bounds_frame.pack(fill=tk.X, pady=2)
+
+        ttk.Label(bounds_frame, text="X Max:").grid(row=0, column=0, sticky=tk.W)
+        self.x_max_var = tk.StringVar(value=str(self.machine_bounds['x_max']))
+        x_max_entry = ttk.Entry(bounds_frame, textvariable=self.x_max_var, width=8)
+        x_max_entry.grid(row=0, column=1, padx=(5, 0))
+        x_max_entry.bind('<Return>', self.on_bounds_changed)
+
+        ttk.Label(bounds_frame, text="Y Max:").grid(row=1, column=0, sticky=tk.W)
+        self.y_max_var = tk.StringVar(value=str(self.machine_bounds['y_max']))
+        y_max_entry = ttk.Entry(bounds_frame, textvariable=self.y_max_var, width=8)
+        y_max_entry.grid(row=1, column=1, padx=(5, 0))
+        y_max_entry.bind('<Return>', self.on_bounds_changed)
+
+        ttk.Button(bounds_frame, text="Update", command=self.on_bounds_changed).grid(row=2, column=0, columnspan=2, pady=5)
+
+        # Update controls
+        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+        self.auto_update_var = tk.BooleanVar(value=self.auto_update)
+        ttk.Checkbutton(parent, text="Auto Update", variable=self.auto_update_var,
+                       command=self.on_auto_update_changed).pack(anchor=tk.W)
+
+        ttk.Button(parent, text="Refresh Now", command=self.manual_update).pack(fill=tk.X, pady=2)
+        ttk.Button(parent, text="Center View", command=self.center_view).pack(fill=tk.X, pady=2)
 
     def setup_status_display(self, parent):
         """Setup status display"""
@@ -762,7 +792,65 @@ class EnhancedMachineAreaWindow(MachineAreaWindow):
 
     def setup_controls(self, parent):
         """Setup enhanced controls"""
-        super().setup_controls(parent)
+        # Display toggles
+        ttk.Label(parent, text="Show Elements:").pack(anchor=tk.W, pady=(5, 0))
+
+        self.show_machine_bounds_var = tk.BooleanVar(value=self.show_machine_bounds)
+        ttk.Checkbutton(parent, text="Machine Bounds", variable=self.show_machine_bounds_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
+
+        self.show_routes_var = tk.BooleanVar(value=self.show_routes)
+        ttk.Checkbutton(parent, text="Routes", variable=self.show_routes_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
+
+        self.show_camera_position_var = tk.BooleanVar(value=self.show_camera_position)
+        ttk.Checkbutton(parent, text="Camera Position", variable=self.show_camera_position_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
+
+        self.show_camera_bounds_var = tk.BooleanVar(value=self.show_camera_bounds)
+        ttk.Checkbutton(parent, text="Camera FOV", variable=self.show_camera_bounds_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
+
+        self.show_calibration_points_var = tk.BooleanVar(value=self.show_calibration_points)
+        ttk.Checkbutton(parent, text="Calibration Points", variable=self.show_calibration_points_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
+
+        self.show_grid_var = tk.BooleanVar(value=self.show_grid)
+        ttk.Checkbutton(parent, text="Grid", variable=self.show_grid_var,
+                       command=self.on_display_option_changed).pack(anchor=tk.W)
+
+        # Separator
+        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+        # Machine bounds configuration
+        ttk.Label(parent, text="Machine Bounds (mm):").pack(anchor=tk.W, pady=(5, 0))
+
+        bounds_frame = ttk.Frame(parent)
+        bounds_frame.pack(fill=tk.X, pady=2)
+
+        ttk.Label(bounds_frame, text="X Max:").grid(row=0, column=0, sticky=tk.W)
+        self.x_max_var = tk.StringVar(value=str(self.machine_bounds['x_max']))
+        x_max_entry = ttk.Entry(bounds_frame, textvariable=self.x_max_var, width=8)
+        x_max_entry.grid(row=0, column=1, padx=(5, 0))
+        x_max_entry.bind('<Return>', self.on_bounds_changed)
+
+        ttk.Label(bounds_frame, text="Y Max:").grid(row=1, column=0, sticky=tk.W)
+        self.y_max_var = tk.StringVar(value=str(self.machine_bounds['y_max']))
+        y_max_entry = ttk.Entry(bounds_frame, textvariable=self.y_max_var, width=8)
+        y_max_entry.grid(row=1, column=1, padx=(5, 0))
+        y_max_entry.bind('<Return>', self.on_bounds_changed)
+
+        ttk.Button(bounds_frame, text="Update", command=self.on_bounds_changed).grid(row=2, column=0, columnspan=2, pady=5)
+
+        # Update controls
+        ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+        self.auto_update_var = tk.BooleanVar(value=self.auto_update)
+        ttk.Checkbutton(parent, text="Auto Update", variable=self.auto_update_var,
+                       command=self.on_auto_update_changed).pack(anchor=tk.W)
+
+        ttk.Button(parent, text="Refresh Now", command=self.manual_update).pack(fill=tk.X, pady=2)
+        ttk.Button(parent, text="Center View", command=self.center_view).pack(fill=tk.X, pady=2)
 
         # Enhanced display options
         ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
@@ -774,7 +862,7 @@ class EnhancedMachineAreaWindow(MachineAreaWindow):
 
         self.show_movement_trail_var = tk.BooleanVar(value=self.show_movement_trail)
         ttk.Checkbutton(parent, text="Movement Trail", variable=self.show_movement_trail_var,
-                       command=self.on_enhanced_option_changed).pack(anchor=tk.X)
+                       command=self.on_enhanced_option_changed).pack(anchor=tk.W)
 
         self.animate_movement_var = tk.BooleanVar(value=self.animate_movement)
         ttk.Checkbutton(parent, text="Animate Movement", variable=self.animate_movement_var,
