@@ -1,43 +1,48 @@
 """
-Fixed CalibrationPanel with proper event handling using @event_aware and @event_handler decorators
-This will automatically enable/disable calibration controls when camera connects/disconnects
+Compact CalibrationPanel with camera connection controls and calibration features
+Streamlined UI with combined sections for better space efficiency
 """
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import numpy as np
+import threading
 from typing import Callable, Optional
 
 # Import event system
 from services.event_broker import event_aware, event_handler, CameraEvents, EventPriority
 
 
-@event_aware()  # ← ESSENTIAL: Makes this class event-aware
+@event_aware()
 class CalibrationPanel:
-    """Camera calibration panel with automatic event handling"""
+    """Compact camera connection and calibration panel"""
 
     def __init__(self, parent, camera_manager, logger: Optional[Callable] = None):
         self.camera_manager = camera_manager
         self.logger = logger
 
         # Create main frame
-        self.frame = ttk.LabelFrame(parent, text="Camera Calibration")
-        self.frame.pack(fill=tk.X, pady=5, padx=5)
+        self.frame = ttk.LabelFrame(parent, text="Camera & Calibration")
+        self.frame.pack(fill=tk.X, pady=2, padx=5)
+
+        # Variables for camera connection
+        self.camera_id_var = tk.StringVar(value="0")
+        self.camera_status_var = tk.StringVar(value="Disconnected")
 
         # Variables for calibration settings
-        self.marker_length_var = tk.DoubleVar(value=20.0)  # Default 20mm marker
-        self.calibration_file_var = tk.StringVar(value="No calibration loaded")
+        self.marker_length_var = tk.DoubleVar(value=20.0)
+        self.calibration_file_var = tk.StringVar(value="No calibration")
 
         # Setup UI components
         self._setup_widgets()
 
-        # Initially disable all controls (camera not connected)
-        self._set_controls_enabled(False)
+        # Initially disable calibration controls
+        self._set_calibration_controls_enabled(False)
 
-        self.log("CalibrationPanel initialized with event handlers", "info")
+        self.log("CalibrationPanel initialized", "info")
 
     def set_logger(self, logger: Callable):
-        """Set logger after initialization to avoid circular dependency"""
+        """Set logger after initialization"""
         self.logger = logger
 
     def log(self, message: str, level: str = "info"):
@@ -48,137 +53,240 @@ class CalibrationPanel:
             print(f"[{level.upper()}] CalibrationPanel: {message}")
 
     def _setup_widgets(self):
-        """Setup all calibration UI widgets"""
+        """Setup compact UI layout"""
 
-        # === Combined ArUco Marker & Calibration Section ===
-        # Marker length setting
-        length_frame = ttk.Frame(self.frame)
-        length_frame.pack(fill=tk.X, pady=5, padx=5)
+        # === Camera Connection Row ===
+        cam_frame = ttk.Frame(self.frame)
+        cam_frame.pack(fill=tk.X, pady=1, padx=3)
 
-        ttk.Label(length_frame, text="Marker Length (mm):").pack(side=tk.LEFT)
-        self.marker_length_entry = ttk.Entry(length_frame, textvariable=self.marker_length_var, width=10)
-        self.marker_length_entry.pack(side=tk.LEFT, padx=(5, 0))
+        # Camera ID and status in one row
+        ttk.Label(cam_frame, text="Camera:").pack(side=tk.LEFT)
+        ttk.Entry(cam_frame, textvariable=self.camera_id_var, width=5).pack(side=tk.LEFT, padx=(2, 0))
 
-        # Calibration file status
-        status_frame = ttk.Frame(self.frame)
-        status_frame.pack(fill=tk.X, pady=2, padx=5)
+        # Status with colored indicator
+        self.cam_status_label = ttk.Label(cam_frame, textvariable=self.camera_status_var,
+                                         foreground="red", font=("TkDefaultFont", 8))
+        self.cam_status_label.pack(side=tk.LEFT, padx=(5, 0))
 
-        ttk.Label(status_frame, text="Calibration:").pack(side=tk.LEFT)
-        self.calib_status_label = ttk.Label(status_frame, textvariable=self.calibration_file_var,
-                                           foreground="red", font=("TkDefaultFont", 8))
+        # === Camera Control Buttons ===
+        btn_frame = ttk.Frame(self.frame)
+        btn_frame.pack(fill=tk.X, pady=1, padx=3)
+
+        self.camera_connect_btn = ttk.Button(btn_frame, text="Connect",
+                                           command=self.connect_camera, width=8)
+        self.camera_connect_btn.pack(side=tk.LEFT, padx=(0, 2))
+
+        self.camera_disconnect_btn = ttk.Button(btn_frame, text="Disconnect",
+                                              command=self.disconnect_camera, width=8, state=tk.DISABLED)
+        self.camera_disconnect_btn.pack(side=tk.LEFT, padx=(0, 2))
+
+        ttk.Button(btn_frame, text="🔍", command=self._diagnose_camera, width=3).pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Button(btn_frame, text="Test", command=self._test_camera_quick, width=6).pack(side=tk.LEFT)
+
+        # === Separator ===
+        ttk.Separator(self.frame, orient='horizontal').pack(fill=tk.X, pady=2)
+
+        # === Calibration Row ===
+        calib_frame = ttk.Frame(self.frame)
+        calib_frame.pack(fill=tk.X, pady=1, padx=3)
+
+        ttk.Label(calib_frame, text="Marker:").pack(side=tk.LEFT)
+        self.marker_length_entry = ttk.Entry(calib_frame, textvariable=self.marker_length_var, width=6)
+        self.marker_length_entry.pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Label(calib_frame, text="mm").pack(side=tk.LEFT, padx=(1, 5))
+
+        # Calibration status (compact)
+        self.calib_status_label = ttk.Label(calib_frame, textvariable=self.calibration_file_var,
+                                           foreground="red", font=("TkDefaultFont", 7))
         self.calib_status_label.pack(side=tk.LEFT, padx=(5, 0))
 
-        # Load calibration button
-        self.load_calib_btn = ttk.Button(self.frame, text="Load Calibration",
-                                        command=self.load_calibration)
-        self.load_calib_btn.pack(pady=5)
+        # === Calibration Control Buttons ===
+        calib_btn_frame = ttk.Frame(self.frame)
+        calib_btn_frame.pack(fill=tk.X, pady=1, padx=3)
 
-    def _set_controls_enabled(self, enabled: bool):
-        """Enable or disable all calibration controls"""
+        self.load_calib_btn = ttk.Button(calib_btn_frame, text="Load Calibration",
+                                        command=self.load_calibration, width=14)
+        self.load_calib_btn.pack(side=tk.LEFT, padx=(0, 2))
+
+        self.info_btn = ttk.Button(calib_btn_frame, text="Info",
+                                  command=self._show_camera_info, width=6)
+        self.info_btn.pack(side=tk.LEFT)
+
+    def _set_calibration_controls_enabled(self, enabled: bool):
+        """Enable or disable calibration controls"""
         state = tk.NORMAL if enabled else tk.DISABLED
-
-        # Marker settings
         self.marker_length_entry.config(state=state)
-
-        # Calibration button
         self.load_calib_btn.config(state=state)
-
-        self.log(f"Calibration controls {'enabled' if enabled else 'disabled'}", "info")
+        self.info_btn.config(state=state)
 
     # === EVENT HANDLERS ===
-    # These methods are automatically registered as event handlers by the @event_handler decorator
 
     @event_handler(CameraEvents.CONNECTED, EventPriority.HIGH)
     def on_camera_connected(self, success: bool):
-        """Handle camera connection event - enable calibration controls"""
+        """Handle camera connection event"""
         if success:
-            self._set_controls_enabled(True)
+            self.camera_status_var.set("Connected")
+            self.cam_status_label.config(foreground="green")
+            self.camera_connect_btn.config(state=tk.DISABLED)
+            self.camera_disconnect_btn.config(state=tk.NORMAL)
+            self._set_calibration_controls_enabled(True)
             self._log_calibration_info()
-            self.log("Camera connected - calibration controls enabled", "info")
         else:
-            self._set_controls_enabled(False)
-            self.log("Camera connection failed - calibration controls disabled", "error")
+            self.camera_status_var.set("Failed")
+            self.cam_status_label.config(foreground="red")
+            self.camera_connect_btn.config(state=tk.NORMAL)
+            self.camera_disconnect_btn.config(state=tk.DISABLED)
+            self._set_calibration_controls_enabled(False)
 
     @event_handler(CameraEvents.DISCONNECTED, EventPriority.HIGH)
     def on_camera_disconnected(self):
-        """Handle camera disconnection event - disable calibration controls"""
-        self._set_controls_enabled(False)
-        self.log("Camera disconnected - calibration controls disabled", "info")
+        """Handle camera disconnection event"""
+        self.camera_status_var.set("Disconnected")
+        self.cam_status_label.config(foreground="red")
+        self.camera_connect_btn.config(state=tk.NORMAL)
+        self.camera_disconnect_btn.config(state=tk.DISABLED)
+        self._set_calibration_controls_enabled(False)
 
     @event_handler(CameraEvents.CALIBRATION_LOADED, EventPriority.NORMAL)
     def on_calibration_loaded(self, file_path: str):
         """Handle calibration loaded event"""
-        self.calibration_file_var.set(f"Loaded: {file_path.split('/')[-1]}")
+        filename = file_path.split('/')[-1]
+        if len(filename) > 20:
+            filename = filename[:17] + "..."
+        self.calibration_file_var.set(f"✓ {filename}")
         self.calib_status_label.config(foreground="green")
         self._log_calibration_info()
-        self._update_button_states()
-        self.log(f"Calibration loaded: {file_path}", "info")
 
     @event_handler(CameraEvents.ERROR, EventPriority.NORMAL)
     def on_camera_error(self, error_message: str):
         """Handle camera error events"""
         self.log(f"Camera error: {error_message}", "error")
 
+    # === CAMERA CONNECTION METHODS ===
+
+    def connect_camera(self):
+        """Connect to camera"""
+        try:
+            camera_id = int(self.camera_id_var.get())
+            self.camera_manager.camera_id = camera_id
+            self.camera_status_var.set("Connecting...")
+            self.cam_status_label.config(foreground="orange")
+
+            def connect_thread():
+                try:
+                    success = self.camera_manager.connect()
+                    if not success:
+                        self.frame.after(0, lambda: messagebox.showerror("Error", "Failed to connect to camera"))
+                except Exception as e:
+                    self.frame.after(0, lambda: messagebox.showerror("Error", f"Camera error: {e}"))
+
+            threading.Thread(target=connect_thread, daemon=True).start()
+
+        except ValueError:
+            self.camera_status_var.set("Invalid ID")
+            messagebox.showerror("Error", "Invalid camera ID")
+        except Exception as e:
+            self.camera_status_var.set("Error")
+            messagebox.showerror("Error", f"Connection failed: {e}")
+
+    def disconnect_camera(self):
+        """Disconnect from camera"""
+        try:
+            self.camera_manager.disconnect()
+        except Exception as e:
+            self.log(f"Error disconnecting camera: {e}", "error")
+
+    def _diagnose_camera(self):
+        """Run camera diagnostics"""
+        def diagnose():
+            try:
+                camera_id = int(self.camera_id_var.get())
+                import cv2
+                cap = cv2.VideoCapture(camera_id)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret:
+                        h, w = frame.shape[:2]
+                        self.log(f"✅ Camera {camera_id} OK - {w}x{h}")
+                    else:
+                        self.log(f"❌ Camera {camera_id} no frame", "error")
+                    cap.release()
+                else:
+                    self.log(f"❌ Cannot open camera {camera_id}", "error")
+            except Exception as e:
+                self.log(f"❌ Camera test failed: {e}", "error")
+
+        threading.Thread(target=diagnose, daemon=True).start()
+
+    def _test_camera_quick(self):
+        """Quick camera test"""
+        try:
+            if self.camera_manager.is_connected:
+                info = self.camera_manager.get_camera_info()
+                self.log(f"Camera: ID={info['camera_id']}, {info['width']}x{info['height']}, "
+                        f"Cal={'Yes' if info['calibrated'] else 'No'}")
+            else:
+                camera_id = int(self.camera_id_var.get())
+                def test():
+                    try:
+                        import cv2
+                        cap = cv2.VideoCapture(camera_id)
+                        if cap.isOpened():
+                            ret, frame = cap.read()
+                            if ret:
+                                h, w = frame.shape[:2]
+                                self.log(f"Test: Camera {camera_id} available ({w}x{h})")
+                            cap.release()
+                        else:
+                            self.log(f"Test: Camera {camera_id} unavailable", "error")
+                    except Exception as e:
+                        self.log(f"Test failed: {e}", "error")
+                threading.Thread(target=test, daemon=True).start()
+        except Exception as e:
+            self.log(f"Test error: {e}", "error")
+
+    def _show_camera_info(self):
+        """Show camera information dialog"""
+        try:
+            if self.camera_manager.is_connected:
+                info = self.camera_manager.get_camera_info()
+                info_text = f"""Camera ID: {info.get('camera_id', 'Unknown')}
+Resolution: {info.get('width', '?')}x{info.get('height', '?')}
+Calibrated: {'Yes' if info.get('calibrated', False) else 'No'}
+Marker: {self.marker_length_var.get():.1f} mm
+Status: {'Ready' if info.get('calibrated', False) else 'Load calibration needed'}"""
+                messagebox.showinfo("Camera Info", info_text)
+            else:
+                messagebox.showwarning("Camera Info", "Camera not connected")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error: {e}")
+
     # === CALIBRATION METHODS ===
 
     def load_calibration(self):
-        """Load camera calibration from file"""
+        """Load camera calibration"""
         try:
             file_path = filedialog.askopenfilename(
                 title="Load Camera Calibration",
                 filetypes=[("NumPy files", "*.npz"), ("All files", "*.*")]
             )
-
             if file_path:
                 success = self.camera_manager.load_calibration(file_path)
-                if success:
-                    # Event will be emitted by camera_manager
-                    self.log(f"Successfully loaded calibration from {file_path}", "info")
-                else:
-                    self.log("Failed to load calibration file", "error")
-                    messagebox.showerror("Error", "Failed to load calibration file")
-
+                if not success:
+                    messagebox.showerror("Error", "Failed to load calibration")
         except Exception as e:
-            self.log(f"Error loading calibration: {e}", "error")
-            messagebox.showerror("Error", f"Error loading calibration:\n{e}")
+            messagebox.showerror("Error", f"Load error: {e}")
 
     def _log_calibration_info(self):
-        """Log calibration info instead of displaying in UI"""
+        """Log calibration info"""
         try:
             if self.camera_manager.is_connected:
-                camera_info = self.camera_manager.get_camera_info()
-
-                info_lines = [
-                    f"Camera ID: {camera_info.get('camera_id', 'Unknown')}",
-                    f"Resolution: {camera_info.get('width', '?')}x{camera_info.get('height', '?')}",
-                    f"Calibrated: {'Yes' if camera_info.get('calibrated', False) else 'No'}",
-                    f"Marker Length: {self.marker_length_var.get():.1f} mm"
-                ]
-
-                if camera_info.get('calibrated', False):
-                    info_lines.append("✅ Ready for marker detection")
-                else:
-                    info_lines.append("⚠️  Load calibration for accurate measurements")
-
-                # Log all info
-                self.log("Camera Info: " + " | ".join(info_lines), "info")
-            else:
-                self.log("Camera not connected", "info")
-
+                info = self.camera_manager.get_camera_info()
+                status = "Ready" if info.get('calibrated', False) else "Need calibration"
+                self.log(f"Camera: {info.get('camera_id')} | {info.get('width')}x{info.get('height')} | "
+                        f"Marker: {self.marker_length_var.get():.1f}mm | {status}")
         except Exception as e:
-            self.log(f"Error logging calibration info: {e}", "error")
-
-    def _update_button_states(self):
-        """Update button states based on current calibration status"""
-        try:
-            is_connected = self.camera_manager.is_connected
-
-            # Load button enabled if connected
-            load_state = tk.NORMAL if is_connected else tk.DISABLED
-            self.load_calib_btn.config(state=load_state)
-
-        except Exception as e:
-            self.log(f"Error updating button states: {e}", "error")
+            self.log(f"Info error: {e}", "error")
 
     # === UTILITY METHODS ===
 
@@ -191,15 +299,20 @@ class CalibrationPanel:
         self.marker_length_var.set(length)
         self._log_calibration_info()
 
-    def is_ready(self) -> bool:
-        """Check if calibration panel is ready (camera connected and optionally calibrated)"""
+    def is_camera_ready(self) -> bool:
+        """Check if camera is connected"""
         return self.camera_manager.is_connected
+
+    def is_calibrated(self) -> bool:
+        """Check if camera is calibrated"""
+        return self.camera_manager.is_calibrated() if self.camera_manager.is_connected else False
 
     def get_calibration_status(self) -> dict:
         """Get current calibration status"""
         return {
             'camera_connected': self.camera_manager.is_connected,
-            'camera_calibrated': self.camera_manager.is_calibrated(),
+            'camera_calibrated': self.is_calibrated(),
             'marker_length': self.get_marker_length(),
-            'controls_enabled': self.load_calib_btn['state'] == 'normal'
+            'controls_enabled': self.load_calib_btn['state'] == 'normal',
+            'camera_id': self.camera_id_var.get()
         }

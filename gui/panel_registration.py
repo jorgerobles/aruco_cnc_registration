@@ -8,15 +8,15 @@ from services.event_broker import (event_aware, event_handler, EventPriority,
 
 @event_aware()
 class RegistrationPanel:
-    """Registration control panel with clean event awareness"""
+    """Compact registration control panel with clean event awareness"""
 
     def __init__(self, parent, registration_manager, logger: Optional[Callable] = None):
         self.registration_manager = registration_manager
         self.logger = logger
 
-        # Create frame
+        # Create main frame
         self.frame = ttk.LabelFrame(parent, text="Registration")
-        self.frame.pack(fill=tk.X, pady=5, padx=5)
+        self.frame.pack(fill=tk.X, pady=2, padx=5)
 
         # Points listbox
         self.points_listbox = None
@@ -53,13 +53,10 @@ class RegistrationPanel:
     @event_handler(RegistrationEvents.POINT_ADDED, EventPriority.HIGH)
     def _on_point_added(self, point_data: dict):
         """Handle registration point added events"""
-        # Update the points list display
         self.update_point_list()
-
         point_index = point_data['point_index']
         total_points = point_data['total_points']
         machine_pos = point_data['machine_pos']
-
         self.log(
             f"Point {point_index + 1} of {total_points} added: X{machine_pos[0]:.3f} Y{machine_pos[1]:.3f} Z{machine_pos[2]:.3f}")
 
@@ -74,16 +71,13 @@ class RegistrationPanel:
         """Handle registration computation events"""
         point_count = computation_data['point_count']
         error = computation_data['error']
-
         self.on_registration_computed(error)
         self.log(f"Registration computed with {point_count} points, RMS error: {error:.4f}")
-
-        # Update UI to show successful registration
         messagebox.showinfo("Success", f"Registration computed!\nRMS Error: {error:.4f}mm")
 
     @event_handler(RegistrationEvents.ERROR)
     def _on_registration_error(self, error_message: str):
-        """Handle registration errors - only real errors, not success messages"""
+        """Handle registration errors"""
         self.log(f"Registration error: {error_message}", "error")
         messagebox.showerror("Registration Error", error_message)
 
@@ -111,32 +105,6 @@ class RegistrationPanel:
         error = load_data.get('error', 0.0)
         self.log(f"Registration loaded from: {file_path} ({point_count} points, error: {error:.4f})")
 
-    @event_handler(RegistrationEvents.VALIDATION_PASSED)
-    def _on_validation_passed(self, validation_data: dict):
-        """Handle registration validation passed events"""
-        error = validation_data.get('error', 0.0)
-        self.log(f"Registration validation passed with error: {error:.4f}")
-
-    @event_handler(RegistrationEvents.VALIDATION_FAILED)
-    def _on_validation_failed(self, validation_data: dict):
-        """Handle registration validation failed events"""
-        error = validation_data.get('error', 0.0)
-        reason = validation_data.get('reason', 'Unknown')
-        self.log(f"Registration validation failed: {reason} (error: {error:.4f})", "error")
-
-    @event_handler(RegistrationEvents.DEBUG_INFO)
-    def _on_debug_info(self, debug_data: dict):
-        """Handle debug information events"""
-        total_points = debug_data.get('total_points', 0)
-        self.log(f"Debug: {total_points} calibration points registered")
-
-        # Optionally log detailed point information in debug mode
-        if self.logger and hasattr(self.logger, '__name__') and 'debug' in str(self.logger.__name__).lower():
-            for point_detail in debug_data.get('points_detail', []):
-                idx = point_detail['index']
-                machine_pos = point_detail['machine_pos']
-                self.log(f"  Point {idx}: Machine({machine_pos[0]:.3f}, {machine_pos[1]:.3f}, {machine_pos[2]:.3f})")
-
     def set_callbacks(self, capture_callback, test_callback, set_offset_callback):
         """Set callback functions for registration operations"""
         self.capture_callback = capture_callback
@@ -144,57 +112,64 @@ class RegistrationPanel:
         self.set_offset_callback = set_offset_callback
 
     def _setup_widgets(self):
-        """Setup registration control widgets"""
-        # Action buttons
-        self.capture_btn = ttk.Button(self.frame, text="Capture Point", command=self._capture_point, state='disabled')
-        self.capture_btn.pack(pady=2)
+        """Setup compact registration control widgets"""
+        # Main controls in a horizontal layout
+        controls_frame = ttk.Frame(self.frame)
+        controls_frame.pack(fill=tk.X, padx=5, pady=2)
 
-        ttk.Button(self.frame, text="Clear Points", command=self.clear_points).pack(pady=2)
-        ttk.Button(self.frame, text="Compute Registration", command=self.compute_registration).pack(pady=2)
-        ttk.Button(self.frame, text="Save Registration", command=self.save_registration).pack(pady=2)
-        ttk.Button(self.frame, text="Load Registration", command=self.load_registration).pack(pady=2)
+        # Row 1: Primary actions
+        row1 = ttk.Frame(controls_frame)
+        row1.pack(fill=tk.X, pady=1)
 
-        # Points list
-        points_frame = ttk.LabelFrame(self.frame, text="Calibration Points")
-        points_frame.pack(fill=tk.X, pady=5)
+        self.capture_btn = ttk.Button(row1, text="Capture", command=self._capture_point,
+                                      state='disabled', width=10)
+        self.capture_btn.pack(side=tk.LEFT, padx=1)
 
-        # Listbox with scrollbar
+        ttk.Button(row1, text="Clear", command=self.clear_points, width=8).pack(side=tk.LEFT, padx=1)
+        ttk.Button(row1, text="Compute", command=self.compute_registration, width=10).pack(side=tk.LEFT, padx=1)
+
+        # Status display (compact)
+        self.status_label = ttk.Label(row1, text="No registration", font=('TkDefaultFont', 8))
+        self.status_label.pack(side=tk.RIGHT, padx=5)
+
+        # Row 2: File operations and test controls
+        row2 = ttk.Frame(controls_frame)
+        row2.pack(fill=tk.X, pady=1)
+
+        ttk.Button(row2, text="Save", command=self.save_registration, width=8).pack(side=tk.LEFT, padx=1)
+        ttk.Button(row2, text="Load", command=self.load_registration, width=8).pack(side=tk.LEFT, padx=1)
+
+        self.test_btn = ttk.Button(row2, text="Test Pos", command=self._test_position,
+                                   state='disabled', width=10)
+        self.test_btn.pack(side=tk.LEFT, padx=1)
+
+        self.offset_btn = ttk.Button(row2, text="Set Offset", command=self._set_work_offset,
+                                     state='disabled', width=10)
+        self.offset_btn.pack(side=tk.LEFT, padx=1)
+
+        # Compact points list with integrated controls
+        points_frame = ttk.Frame(self.frame)
+        points_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        # Points listbox (smaller height)
         listbox_frame = ttk.Frame(points_frame)
-        listbox_frame.pack(fill=tk.X, padx=5, pady=5)
+        listbox_frame.pack(fill=tk.X)
 
-        self.points_listbox = tk.Listbox(listbox_frame, height=6)
+        self.points_listbox = tk.Listbox(listbox_frame, height=4, font=('TkDefaultFont', 8))
         scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=self.points_listbox.yview)
         self.points_listbox.configure(yscrollcommand=scrollbar.set)
 
         self.points_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Point management buttons
-        point_mgmt_frame = ttk.Frame(points_frame)
-        point_mgmt_frame.pack(fill=tk.X, padx=5, pady=(0, 5))
+        # Point management controls (compact)
+        mgmt_frame = ttk.Frame(points_frame)
+        mgmt_frame.pack(fill=tk.X, pady=1)
 
-        ttk.Button(point_mgmt_frame, text="Remove Selected", command=self._remove_selected_point).pack(side=tk.LEFT,
-                                                                                                       padx=2)
-        ttk.Button(point_mgmt_frame, text="Refresh List", command=self.update_point_list).pack(side=tk.LEFT, padx=2)
-
-        # Registration status
-        status_frame = ttk.LabelFrame(self.frame, text="Registration Status")
-        status_frame.pack(fill=tk.X, pady=5)
-
-        self.status_label = ttk.Label(status_frame, text="No registration computed")
-        self.status_label.pack(pady=5)
-
-        # Test controls
-        test_frame = ttk.LabelFrame(self.frame, text="Test & Apply")
-        test_frame.pack(fill=tk.X, pady=5)
-
-        self.test_btn = ttk.Button(test_frame, text="Test Current Position", command=self._test_position,
-                                   state='disabled')
-        self.test_btn.pack(pady=2)
-
-        self.offset_btn = ttk.Button(test_frame, text="Set Work Offset", command=self._set_work_offset,
-                                     state='disabled')
-        self.offset_btn.pack(pady=2)
+        ttk.Button(mgmt_frame, text="Remove Selected", command=self._remove_selected_point,
+                   width=15).pack(side=tk.LEFT, padx=1)
+        ttk.Button(mgmt_frame, text="Refresh", command=self.update_point_list,
+                   width=10).pack(side=tk.LEFT, padx=1)
 
     def on_camera_connected(self):
         """Enable camera-dependent controls when camera connects"""
@@ -214,8 +189,7 @@ class RegistrationPanel:
 
     def on_registration_computed(self, error: float):
         """Called when registration is computed successfully"""
-        self.status_label.config(text=f"Registration computed - RMS Error: {error:.4f}mm")
-        # Enable test/offset buttons if camera is connected
+        self.status_label.config(text=f"RMS: {error:.3f}mm")
         if self.camera_connected:
             self.test_btn.config(state='normal')
             self.offset_btn.config(state='normal')
@@ -285,7 +259,6 @@ class RegistrationPanel:
 
         point_index = selection[0]
         try:
-            # Check if registration manager has remove method
             if hasattr(self.registration_manager, 'remove_calibration_point'):
                 success = self.registration_manager.remove_calibration_point(point_index)
                 if success:
@@ -302,60 +275,48 @@ class RegistrationPanel:
         """Clear all calibration points"""
         try:
             self.registration_manager.clear_calibration_points()
-            # Events will handle the UI updates
             self.log("Calibration points cleared")
         except Exception as e:
             self.log(f"Failed to clear points: {e}", "error")
             messagebox.showerror("Error", f"Failed to clear points: {e}")
 
-    def add_point_to_list(self, machine_pos):
-        """Add point to the listbox display"""
-        try:
-            point_count = self.registration_manager.get_calibration_points_count()
-            point_str = f"Point {point_count}: M({machine_pos[0]:.2f}, {machine_pos[1]:.2f}, {machine_pos[2]:.2f})"
-            self.points_listbox.insert(tk.END, point_str)
-        except Exception as e:
-            self.log(f"Failed to add point to list: {e}", "error")
-
     def update_point_list(self):
         """Update the points list display"""
         self.points_listbox.delete(0, tk.END)
         try:
-            # Try to get machine positions if method exists
             if hasattr(self.registration_manager, 'get_machine_positions'):
                 machine_positions = self.registration_manager.get_machine_positions()
                 for i, machine_pos in enumerate(machine_positions):
-                    point_str = f"Point {i + 1}: M({machine_pos[0]:.2f}, {machine_pos[1]:.2f}, {machine_pos[2]:.2f})"
+                    # Compact display format
+                    point_str = f"{i + 1}: M({machine_pos[0]:.1f}, {machine_pos[1]:.1f}, {machine_pos[2]:.1f})"
                     self.points_listbox.insert(tk.END, point_str)
             else:
-                # Fallback: just show point count
                 count = self.registration_manager.get_calibration_points_count()
                 for i in range(count):
-                    point_str = f"Point {i + 1}: (Data available)"
+                    point_str = f"{i + 1}: Point data"
                     self.points_listbox.insert(tk.END, point_str)
 
-            # Update status based on point count
+            # Update compact status
             count = self.registration_manager.get_calibration_points_count()
             if count == 0:
-                self.status_label.config(text="No calibration points")
+                self.status_label.config(text="No points")
             elif count < 3:
-                self.status_label.config(text=f"{count} points captured (need 3+ to compute)")
+                self.status_label.config(text=f"{count} pts (need 3+)")
             else:
-                # Check if registration is computed
                 if self.registration_manager.is_registered():
                     try:
                         if hasattr(self.registration_manager, 'get_registration_error'):
                             error = self.registration_manager.get_registration_error()
                             if error is not None:
-                                self.status_label.config(text=f"Registration computed - RMS Error: {error:.4f}mm")
+                                self.status_label.config(text=f"RMS: {error:.3f}mm")
                             else:
-                                self.status_label.config(text="Registration computed")
+                                self.status_label.config(text="Registered")
                         else:
-                            self.status_label.config(text="Registration computed")
+                            self.status_label.config(text="Registered")
                     except:
-                        self.status_label.config(text="Registration computed")
+                        self.status_label.config(text="Registered")
                 else:
-                    self.status_label.config(text=f"{count} points ready - click Compute Registration")
+                    self.status_label.config(text=f"{count} pts ready")
 
         except Exception as e:
             self.log(f"Error updating point list: {e}", "error")
@@ -369,19 +330,16 @@ class RegistrationPanel:
                 return
 
             self.log(f"Computing registration with {point_count} points...")
-            self.status_label.config(text="Computing registration...")
+            self.status_label.config(text="Computing...")
 
             success = self.registration_manager.compute_registration()
-
             if not success:
-                self.status_label.config(text="Registration computation failed")
+                self.status_label.config(text="Failed")
                 messagebox.showerror("Error", "Registration computation failed")
-
-            # Success case will be handled by event handler
 
         except Exception as e:
             self.log(f"Registration computation failed: {e}", "error")
-            self.status_label.config(text="Registration computation failed")
+            self.status_label.config(text="Failed")
             messagebox.showerror("Error", f"Registration failed: {e}")
 
     def save_registration(self):
@@ -400,7 +358,6 @@ class RegistrationPanel:
                 success = self.registration_manager.save_registration(filename)
                 if not success:
                     messagebox.showerror("Error", "Failed to save registration")
-                # Success case will be handled by event handler
             except Exception as e:
                 self.log(f"Failed to save registration: {e}", "error")
                 messagebox.showerror("Error", f"Failed to save registration: {e}")
@@ -417,7 +374,6 @@ class RegistrationPanel:
                 success = self.registration_manager.load_registration(filename)
                 if not success:
                     messagebox.showerror("Error", "Failed to load registration")
-                # Success case will be handled by event handler automatically
             except Exception as e:
                 self.log(f"Failed to load registration from {filename}: {e}", "error")
                 messagebox.showerror("Error", f"Failed to load registration: {e}")

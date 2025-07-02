@@ -1,6 +1,6 @@
 """
 Complete Main Window with Machine Area Integration
-Updated main_window.py showing event-aware panels with machine area visualization
+Updated main_window.py with corrected panel constructors after UI reorganization
 """
 
 import time
@@ -24,9 +24,6 @@ from services.grbl_controller import GRBLController
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
 from services.overlays.svg_routes_overlay import SVGRoutesOverlay
 from services.registration_manager import RegistrationManager
-
-
-
 
 
 @event_aware()
@@ -270,10 +267,13 @@ class RegistrationGUI:
 
         # Create control panels - Pass the main window's log method as logger
         # All panels are now event-aware and will auto-register their event handlers
+
+        # FIXED: ConnectionPanel now only takes grbl_controller (no camera_manager)
         self.connection_panel = ConnectionPanel(
-            scrollable_frame, self.grbl_controller, self.camera_manager, self.log
+            scrollable_frame, self.grbl_controller, self.log
         )
 
+        # CalibrationPanel handles all camera functionality
         self.calibration_panel = CalibrationPanel(
             scrollable_frame, self.camera_manager, self.log
         )
