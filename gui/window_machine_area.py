@@ -10,7 +10,8 @@ from typing import Optional, Tuple, List, Callable
 import threading
 import time
 
-from services.event_broker import event_aware, event_handler, GRBLEvents, RegistrationEvents, CameraEvents
+from services.event_broker import event_aware, event_handler
+from services.events import GRBLEvents, RegistrationEvents, CameraEvents
 
 
 @event_aware()

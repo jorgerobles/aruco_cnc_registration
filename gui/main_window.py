@@ -10,17 +10,17 @@ from tkinter import ttk, scrolledtext
 from typing import List
 import numpy as np
 
-from gui.machine_area_window import EnhancedMachineAreaWindow
+from gui.window_machine_area import EnhancedMachineAreaWindow
 from gui.panel_connection import ConnectionPanel
-from gui.panel_calibration import CalibrationPanel
-from gui.panel_machine import MachineControlPanel
+from gui.panel_calibration import CameraPanel
+from gui.panel_jogger import JogPanel
 from gui.panel_registration import RegistrationPanel
 from gui.panel_svg import SVGRoutesPanel
 from gui.panel_debug import DebugPanel
 from gui.camera_display import CameraDisplay
 from services.camera_manager import CameraManager
-from services.event_broker import (event_aware, event_handler, EventBroker,
-                                   CameraEvents, GRBLEvents, RegistrationEvents, ApplicationEvents, EventPriority)
+from services.event_broker import (event_aware, event_handler, EventBroker, EventPriority)
+from services.events import ( CameraEvents, GRBLEvents, RegistrationEvents, ApplicationEvents)
 from services.grbl_controller import GRBLController
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
 from services.overlays.svg_routes_overlay import SVGRoutesOverlay
@@ -108,7 +108,6 @@ class RegistrationGUI:
     @event_handler(CameraEvents.DISCONNECTED, EventPriority.HIGH)
     def _on_camera_disconnected(self):
         """Handle camera disconnection event"""
-        self.log("Camera disconnected", "info")
         self.status_var.set("Camera disconnected")
 
         # Stop camera feed
@@ -262,26 +261,15 @@ class RegistrationGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # Create control panels - Pass the main window's log method as logger
-        # All panels are now event-aware and will auto-register their event handlers
 
-        # FIXED: ConnectionPanel now only takes grbl_controller (no camera_manager)
-        self.connection_panel = ConnectionPanel(
-            scrollable_frame, self.grbl_controller, self.log
-        )
+        self.connection_panel = ConnectionPanel(scrollable_frame, self.grbl_controller)
 
-        # CalibrationPanel handles all camera functionality
-        self.calibration_panel = CalibrationPanel(
-            scrollable_frame, self.camera_manager, self.log
-        )
+        # CameraPanel handles all camera functionality
+        self.calibration_panel = CameraPanel(scrollable_frame, self.camera_manager)
 
-        self.machine_panel = MachineControlPanel(
-            scrollable_frame, self.grbl_controller, self.log
-        )
+        self.machine_panel = JogPanel(scrollable_frame, self.grbl_controller)
 
-        self.registration_panel = RegistrationPanel(
-            scrollable_frame, self.registration_manager, self.log
-        )
+        self.registration_panel = RegistrationPanel(scrollable_frame, self.registration_manager)
 
         # Set up registration panel callbacks
         self.registration_panel.set_callbacks(
@@ -323,9 +311,7 @@ class RegistrationGUI:
     def setup_debug_panel(self, parent):
         """Setup debug panel using the dedicated DebugPanel class"""
         # Create the debug panel instance - Pass the main window's log method as logger
-        self.debug_panel = DebugPanel(
-            parent, self.grbl_controller, self.camera_manager, self.log
-        )
+        self.debug_panel = DebugPanel(parent)
 
     def setup_machine_area_window(self):
         """Setup machine area visualization window"""
@@ -629,18 +615,12 @@ class RegistrationGUI:
                 self.marker_overlay.set_marker_length(marker_length)
 
             self.camera_display.start_feed()
-            self.log("Camera feed started", "info")
-            # Update camera status in debug panel
-            if self.debug_panel:
-                self.debug_panel.update_camera_status()
-        else:
-            self.log("Cannot start camera feed - camera not connected", "error")
+
 
     def stop_camera_feed(self):
         """Stop camera feed"""
         if self.camera_display:
             self.camera_display.stop_feed()
-            self.log("Camera feed stopped", "info")
 
     def load_svg_routes(self, svg_file_path: str):
         """Load SVG routes and update machine area visualization"""

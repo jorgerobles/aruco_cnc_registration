@@ -4,19 +4,19 @@ Combines the original machine control with the concentric ring jogging UI
 Fully wired with events and GRBL controller integration
 """
 
+import math
+import threading
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Callable, Optional
-import threading
-import time
-import math
 
-from services.event_broker import (event_aware, event_handler, EventPriority,
-                                   GRBLEvents)
+from services.event_broker import (event_aware, event_handler, EventPriority)
+from services.events import GRBLEvents
 
 
 @event_aware()
-class MachineControlPanel:
+class JogPanel:
     """Machine control panel with integrated concentric ring jogging interface"""
 
     def __init__(self, parent, grbl_controller, logger: Optional[Callable] = None):
@@ -50,10 +50,10 @@ class MachineControlPanel:
 
         # Button configurations for concentric circles - smaller radii
         self.button_configs = [
-            {'radius': 15, 'step': 0, 'color': '#e74c3c', 'count': 1},    # Center HOME button
-            {'radius': 40, 'step': 1, 'color': '#f39c12', 'count': 4},    # First ring - step 1
-            {'radius': 65, 'step': 10, 'color': '#27ae60', 'count': 4},   # Second ring - step 10
-            {'radius': 90, 'step': 50, 'color': '#3498db', 'count': 4},   # Third ring - step 50
+            {'radius': 15, 'step': 0, 'color': '#e74c3c', 'count': 1},  # Center HOME button
+            {'radius': 40, 'step': 1, 'color': '#f39c12', 'count': 4},  # First ring - step 1
+            {'radius': 65, 'step': 10, 'color': '#27ae60', 'count': 4},  # Second ring - step 10
+            {'radius': 90, 'step': 50, 'color': '#3498db', 'count': 4},  # Third ring - step 50
             {'radius': 115, 'step': 100, 'color': '#9b59b6', 'count': 4}  # Fourth ring - step 100
         ]
 
@@ -216,13 +216,13 @@ class MachineControlPanel:
         # All Z buttons in order from +100 to -100
         z_buttons = [
             ("+Z", 100, self.z_colors[3]),  # +Z 100
-            ("+Z", 50, self.z_colors[2]),   # +Z 50
-            ("+Z", 10, self.z_colors[1]),   # +Z 10
-            ("+Z", 1, self.z_colors[0]),    # +Z 1
-            ("-Z", 1, self.z_colors[0]),    # -Z 1
-            ("-Z", 10, self.z_colors[1]),   # -Z 10
-            ("-Z", 50, self.z_colors[2]),   # -Z 50
-            ("-Z", 100, self.z_colors[3])   # -Z 100
+            ("+Z", 50, self.z_colors[2]),  # +Z 50
+            ("+Z", 10, self.z_colors[1]),  # +Z 10
+            ("+Z", 1, self.z_colors[0]),  # +Z 1
+            ("-Z", 1, self.z_colors[0]),  # -Z 1
+            ("-Z", 10, self.z_colors[1]),  # -Z 10
+            ("-Z", 50, self.z_colors[2]),  # -Z 50
+            ("-Z", 100, self.z_colors[3])  # -Z 100
         ]
 
         for direction, step, color in z_buttons:
@@ -236,7 +236,7 @@ class MachineControlPanel:
         """Setup the canvas with concentric ring jogging interface"""
         # Canvas for drawing concentric button layout - smaller size, no background color
         self.canvas = tk.Canvas(self.center_frame, width=250, height=250,
-                               bg='white', highlightthickness=0)
+                                bg='white', highlightthickness=0)
         self.canvas.pack(expand=True, padx=5, pady=5)
 
         # Create the concentric button layout
@@ -261,8 +261,8 @@ class MachineControlPanel:
 
         for text, command, color in control_buttons:
             btn = tk.Button(self.right_frame, text=text, command=command,
-                           bg=color, fg='white', font=('Arial', 8, 'bold'),
-                           relief='raised', bd=1, width=8, height=1)
+                            bg=color, fg='white', font=('Arial', 8, 'bold'),
+                            relief='raised', bd=1, width=8, height=1)
             btn.pack(pady=0, padx=2, fill='x')
 
     def _setup_legend(self):
@@ -291,7 +291,7 @@ class MachineControlPanel:
 
             # Symbol/number in color box
             symbol_label = tk.Label(color_frame, text=text,
-                                   bg=color, fg='white', font=('Arial', 10, 'bold'))
+                                    bg=color, fg='white', font=('Arial', 10, 'bold'))
             symbol_label.place(relx=0.5, rely=0.5, anchor='center')
 
     def _create_concentric_buttons(self):
@@ -315,7 +315,7 @@ class MachineControlPanel:
         # Draw center button last (on top)
         center_config = self.button_configs[0]
         self._create_center_button(center_x, center_y, center_config['radius'],
-                                  center_config['step'], center_config['color'])
+                                   center_config['step'], center_config['color'])
 
     def _create_center_button(self, cx, cy, radius, step, color):
         """Create the center HOME button as a circle"""
@@ -519,7 +519,7 @@ class MachineControlPanel:
         # Draw center button last (on top)
         center_config = self.button_configs[0]
         self._create_center_button(center_x, center_y, center_config['radius'],
-                                  center_config['step'], center_config['color'])
+                                   center_config['step'], center_config['color'])
 
     def _update_connection_info(self):
         """Update connection info display"""
@@ -603,16 +603,9 @@ class MachineControlPanel:
                 return
 
             feed_rate = float(self.feed_rate_var.get())
-            timeout = float(self.jog_timeout_var.get())
-
-            self.log(f"🎯 Starting jog: X{x:+.3f} Y{y:+.3f} Z{z:+.3f} @ F{feed_rate} (timeout: {timeout}s)")
 
             # Record start time
             start_time = time.time()
-
-            # Set custom timeout for this jog operation
-            if hasattr(self.grbl_controller, 'set_jog_timeout'):
-                self.grbl_controller.set_jog_timeout(timeout)
 
             # Use the controller's move_relative method
             try:
@@ -808,7 +801,8 @@ class MachineControlPanel:
             try:
                 position = self.grbl_controller.get_position()
                 elapsed = time.time() - start_time
-                self.log(f"✅ Position query successful: X{position[0]:.3f} Y{position[1]:.3f} Z{position[2]:.3f} ({elapsed:.3f}s)")
+                self.log(
+                    f"✅ Position query successful: X{position[0]:.3f} Y{position[1]:.3f} Z{position[2]:.3f} ({elapsed:.3f}s)")
             except Exception as e:
                 self.log(f"❌ Position query failed: {e}", "error")
 
@@ -859,7 +853,7 @@ class MachineControlPanel:
 
         # Async jog toggle
         ttk.Checkbutton(jog_settings_frame, text="Use Async Jogging",
-                       variable=self.use_async_jog_var).pack(pady=2)
+                        variable=self.use_async_jog_var).pack(pady=2)
 
         # Connection info
         info_frame = ttk.LabelFrame(parent, text="Connection Info")

@@ -1,29 +1,25 @@
 """
 Simple Debug Panel - Clean log display with proper color coding by level
-Removed GRBL-specific filtering - that responsibility belongs to GRBL controller
+Removed external dependencies - self-contained logging panel
 """
 
-import tkinter as tk
-from tkinter import ttk, scrolledtext, filedialog
-import time
-from datetime import datetime
-from typing import Optional, Callable, Dict, Any
-import threading
 import queue
+import threading
+import time
+import tkinter as tk
+from datetime import datetime
+from tkinter import ttk, scrolledtext, filedialog
+from typing import Dict
 
-from services.event_broker import (event_aware, event_handler, EventPriority,
-                                   GRBLEvents, CameraEvents, ApplicationEvents)
+from services.event_broker import (event_aware, event_handler, EventPriority)
+from services.events import ApplicationEvents
 
 
 @event_aware()
 class DebugPanel:
     """Simple debug panel focused on clean log display with proper color coding"""
 
-    def __init__(self, parent, grbl_controller, camera_manager, logger: Optional[Callable] = None):
-        self.grbl_controller = grbl_controller
-        self.camera_manager = camera_manager
-        self.logger = logger
-
+    def __init__(self, parent):
         # Threading and queue for safe GUI updates
         self.log_queue = queue.Queue()
         self._gui_update_running = True
@@ -40,8 +36,7 @@ class DebugPanel:
     def setup_gui(self, parent):
         """Setup the simple debug panel GUI"""
         # Main frame
-        self.frame = ttk.LabelFrame(parent, text="🐛 Debug Console")
-        self.frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.frame = parent
 
         # Control frame
         control_frame = ttk.Frame(self.frame)
@@ -50,20 +45,6 @@ class DebugPanel:
         # Status frame (left side)
         status_frame = ttk.Frame(control_frame)
         status_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        # Connection status labels
-        ttk.Label(status_frame, text="GRBL:").pack(side=tk.LEFT)
-        self.grbl_status_label = ttk.Label(status_frame, text="Disconnected", foreground="red")
-        self.grbl_status_label.pack(side=tk.LEFT, padx=(0, 10))
-
-        ttk.Label(status_frame, text="Camera:").pack(side=tk.LEFT)
-        self.camera_status_label = ttk.Label(status_frame, text="Disconnected", foreground="red")
-        self.camera_status_label.pack(side=tk.LEFT, padx=(0, 10))
-
-        # Log count
-        ttk.Label(status_frame, text="Logs:").pack(side=tk.LEFT)
-        self.log_count_label = ttk.Label(status_frame, text="0")
-        self.log_count_label.pack(side=tk.LEFT)
 
         # Action buttons (right side)
         action_frame = ttk.Frame(control_frame)
@@ -100,11 +81,9 @@ class DebugPanel:
         # Make read-only
         self.log_display.config(state=tk.DISABLED)
 
-        # Initialize status
-        self.update_status_display()
-
     def start_gui_updater(self):
         """Start the GUI update thread"""
+
         def gui_updater():
             while self._gui_update_running:
                 try:
@@ -141,9 +120,6 @@ class DebugPanel:
             # Add to queue for GUI thread processing
             self.log_queue.put(log_entry)
 
-            # Update log count display
-            if hasattr(self, 'log_count_label'):
-                self.log_count_label.config(text=str(self._stats['total_logs']))
 
         except Exception as e:
             # Fallback - print to console if GUI logging fails
@@ -191,9 +167,6 @@ class DebugPanel:
                 'start_time': time.time()
             }
 
-            # Update display
-            self.log_count_label.config(text="0")
-
             self.log("Debug log cleared", "info")
 
         except Exception as e:
@@ -232,28 +205,6 @@ class DebugPanel:
         except Exception as e:
             self.log(f"Export failed: {e}", "error")
 
-    def update_status_display(self):
-        """Update connection status display"""
-        try:
-            # Update GRBL status
-            if self.grbl_controller and self.grbl_controller.is_connected:
-                self.grbl_status_label.config(text="Connected", foreground="green")
-            else:
-                self.grbl_status_label.config(text="Disconnected", foreground="red")
-
-            # Update camera status
-            if self.camera_manager and self.camera_manager.is_connected:
-                self.camera_status_label.config(text="Connected", foreground="green")
-            else:
-                self.camera_status_label.config(text="Disconnected", foreground="red")
-
-        except Exception as e:
-            print(f"Status update error: {e}")
-
-    def update_camera_status(self):
-        """Update camera status (called externally)"""
-        self.update_status_display()
-
     def is_ready(self) -> bool:
         """Check if debug panel is ready for logging"""
         return hasattr(self, 'log_display') and self.log_display.winfo_exists()
@@ -263,62 +214,6 @@ class DebugPanel:
         self._gui_update_running = False
         if hasattr(self, 'gui_thread') and self.gui_thread.is_alive():
             self.gui_thread.join(timeout=1.0)
-
-    # Simple event handlers - just log what happens
-    @event_handler(GRBLEvents.CONNECTED, EventPriority.NORMAL)
-    def _on_grbl_connected(self, success: bool):
-        """Handle GRBL connection events"""
-        if success:
-            self.log("GRBL connected successfully", "info")
-        else:
-            self.log("GRBL connection failed", "error")
-        self.update_status_display()
-
-    @event_handler(GRBLEvents.DISCONNECTED, EventPriority.NORMAL)
-    def _on_grbl_disconnected(self):
-        """Handle GRBL disconnection"""
-        self.log("GRBL disconnected", "info")
-        self.update_status_display()
-
-    @event_handler(GRBLEvents.ERROR, EventPriority.LOW)
-    def _on_grbl_error(self, error_message: str):
-        """Handle GRBL error messages - for actual errors only"""
-        self.log(f"GRBL ERROR: {error_message}", "error")
-
-    @event_handler(GRBLEvents.DEBUG_INFO, EventPriority.LOW)
-    def _on_grbl_debug_info(self, debug_message: str):
-        """Handle GRBL debug information - for general debug messages"""
-        self.log(f"GRBL: {debug_message}", "grbl")
-
-    @event_handler(GRBLEvents.COMMAND_SENT, EventPriority.LOW)
-    def _on_grbl_command_sent(self, command: str):
-        """Handle GRBL command sent events"""
-        self.log(f"GRBL SENT: {command}", "sent")
-
-    @event_handler(GRBLEvents.RESPONSE_RECEIVED, EventPriority.LOW)
-    def _on_grbl_response_received(self, response: str):
-        """Handle GRBL response events"""
-        self.log(f"GRBL RECV: {response}", "received")
-
-    @event_handler(CameraEvents.CONNECTED, EventPriority.NORMAL)
-    def _on_camera_connected(self, success: bool):
-        """Handle camera connection events"""
-        if success:
-            self.log("Camera connected successfully", "info")
-        else:
-            self.log("Camera connection failed", "error")
-        self.update_status_display()
-
-    @event_handler(CameraEvents.DISCONNECTED, EventPriority.NORMAL)
-    def _on_camera_disconnected(self):
-        """Handle camera disconnection"""
-        self.log("Camera disconnected", "info")
-        self.update_status_display()
-
-    @event_handler(CameraEvents.ERROR, EventPriority.NORMAL)
-    def _on_camera_error(self, error_message: str):
-        """Handle camera errors"""
-        self.log(f"Camera error: {error_message}", "error")
 
     @event_handler(ApplicationEvents.SHUTDOWN, EventPriority.HIGH)
     def _on_app_shutdown(self):

@@ -11,8 +11,8 @@ import numpy as np
 from PIL import Image, ImageTk
 from typing import Optional, Callable, List, Tuple, Dict, Type
 
-from services.event_broker import (event_aware, event_handler,
-                         CameraEvents, EventPriority)
+from services.event_broker import (event_aware, event_handler, EventPriority)
+from services.events import CameraEvents
 from services.overlays.overlay_interface import FrameOverlay
 
 
@@ -20,11 +20,10 @@ from services.overlays.overlay_interface import FrameOverlay
 class CameraDisplay:
     """Widget for displaying camera feed with marker detection and pluggable overlays"""
 
-    def __init__(self, parent, camera_manager, registration_manager=None,
+    def __init__(self, parent, camera_manager,
                  logger: Optional[Callable] = None):
         self.parent = parent
         self.camera_manager = camera_manager
-        self.registration_manager = registration_manager
         self.logger = logger
 
         # Display state
@@ -141,12 +140,12 @@ class CameraDisplay:
 
     def stop_feed(self):
         """Stop camera feed display"""
-        self.camera_running = False
-        self.log("Camera feed stopped", "info")
+        if self.camera_running:
+            self.camera_running = False
 
-        # Clear the canvas
-        self.canvas.delete("all")
-        self._show_disconnected_message()
+            # Clear the canvas
+            self.canvas.delete("all")
+            self._show_disconnected_message()
 
     def _show_disconnected_message(self):
         """Show disconnected message on canvas"""

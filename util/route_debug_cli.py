@@ -58,7 +58,7 @@ def demonstrate_debug_features():
     overlay.enable_coordinate_grid(True)
 
     # Load SVG routes (you'll need to provide an actual SVG file)
-    svg_file = "test_routes.svg"  # Replace with your SVG file path
+    svg_file = "../data/test_routes.svg"  # Replace with your SVG file path
 
     try:
         print(f"\n3. Loading SVG routes from: {svg_file}")
@@ -282,7 +282,7 @@ def create_sample_svg_file():
 </svg>'''
 
     try:
-        with open("test_routes.svg", "w") as f:
+        with open("../data/test_routes.svg", "w") as f:
             f.write(svg_content)
         print("Created sample SVG file: test_routes.svg")
         return "test_routes.svg"

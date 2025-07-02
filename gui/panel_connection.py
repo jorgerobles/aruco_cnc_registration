@@ -11,8 +11,8 @@ import threading
 import time
 from typing import Callable, Optional
 
-from services.event_broker import (event_aware, event_handler, EventPriority,
-                                   GRBLEvents)
+from services.event_broker import (event_aware, event_handler, EventPriority)
+from services.events import GRBLEvents
 
 
 @event_aware()

@@ -6,8 +6,8 @@ Marker detection moved to MarkerDetectionOverlay
 import cv2
 import numpy as np
 import platform
-from services.event_broker import event_aware, CameraEvents
-
+from services.event_broker import event_aware
+from services.events import CameraEvents
 
 def get_optimal_camera_backend():
     """Get the optimal camera backend for current platform"""

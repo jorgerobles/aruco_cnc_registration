@@ -1,5 +1,5 @@
 """
-Compact CalibrationPanel with camera connection controls and calibration features
+Compact CameraPanel with camera connection controls and calibration features
 Streamlined UI with combined sections for better space efficiency
 """
 
@@ -10,11 +10,12 @@ import threading
 from typing import Callable, Optional
 
 # Import event system
-from services.event_broker import event_aware, event_handler, CameraEvents, EventPriority
+from services.event_broker import event_aware, event_handler, EventPriority
+from services.events import CameraEvents
 
 
 @event_aware()
-class CalibrationPanel:
+class CameraPanel:
     """Compact camera connection and calibration panel"""
 
     def __init__(self, parent, camera_manager, logger: Optional[Callable] = None):
@@ -22,7 +23,7 @@ class CalibrationPanel:
         self.logger = logger
 
         # Create main frame
-        self.frame = ttk.LabelFrame(parent, text="Camera & Calibration")
+        self.frame = ttk.LabelFrame(parent, text="Camera")
         self.frame.pack(fill=tk.X, pady=2, padx=5)
 
         # Variables for camera connection
@@ -39,7 +40,7 @@ class CalibrationPanel:
         # Initially disable calibration controls
         self._set_calibration_controls_enabled(False)
 
-        self.log("CalibrationPanel initialized", "info")
+        self.log("CameraPanel initialized", "info")
 
     def set_logger(self, logger: Callable):
         """Set logger after initialization"""
@@ -48,9 +49,9 @@ class CalibrationPanel:
     def log(self, message: str, level: str = "info"):
         """Log message if logger is available"""
         if self.logger:
-            self.logger(f"CalibrationPanel: {message}", level)
+            self.logger(f"CameraPanel: {message}", level)
         else:
-            print(f"[{level.upper()}] CalibrationPanel: {message}")
+            print(f"[{level.upper()}] CameraPanel: {message}")
 
     def _setup_widgets(self):
         """Setup compact UI layout"""

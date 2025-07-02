@@ -5,9 +5,8 @@ from tkinter import ttk, messagebox, filedialog, scrolledtext
 from typing import Callable, Optional
 import numpy as np
 
-from services.event_broker import (event_aware, event_handler, EventPriority,
-                                   CameraEvents, RegistrationEvents, GRBLEvents)
-
+from services.event_broker import (event_aware, event_handler, EventPriority)
+from services.events import (CameraEvents, RegistrationEvents, GRBLEvents)
 
 @event_aware()
 class SVGRoutesPanel:

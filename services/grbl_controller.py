@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 import uuid
 from concurrent.futures import Future
-from services.event_broker import event_aware, event_handler, GRBLEvents, EventPriority
+from services.event_broker import event_aware, event_handler, EventPriority
+from services.events import GRBLEvents
 
 
 class CommandState(Enum):

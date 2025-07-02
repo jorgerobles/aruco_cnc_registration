@@ -6,7 +6,8 @@ Eliminates duplicate logging and improper use of ERROR events for success messag
 
 import numpy as np
 from typing import List, Tuple, Optional
-from services.event_broker import event_aware, RegistrationEvents
+from services.event_broker import event_aware
+from services.events import RegistrationEvents
 
 
 @event_aware()
