@@ -366,6 +366,7 @@ class GRBLEvents:
     ERROR = "grbl.error"
     COMMAND_SENT = "grbl.command_sent"
     RESPONSE_RECEIVED = "grbl.response_received"
+    DEBUG_INFO = "grbl.debug_info"  # NEW: For GRBL internal debug messages
 
 
 class RegistrationEvents:

@@ -1,6 +1,6 @@
 """
 Compact Connection Panel focused only on GRBL connections
-Streamlined UI with test buttons removed for better space efficiency
+Fixed to avoid duplicate logging - GRBL controller handles its own logging
 """
 
 import tkinter as tk
@@ -43,36 +43,32 @@ class ConnectionPanel:
             self.logger(message, level)
         print(f"[{level.upper()}] {message}")  # Also print to console
 
-    # Event handlers using decorators
+    # Event handlers using decorators - SIMPLIFIED to avoid duplicate logging
     @event_handler(GRBLEvents.CONNECTED, EventPriority.HIGH)
     def _on_grbl_connected(self, success: bool):
-        """Handle GRBL connection status changes"""
+        """Handle GRBL connection status changes - UI updates only"""
         if success:
             self.grbl_status_var.set("Connected")
             self.grbl_connect_btn.config(state=tk.DISABLED)
             self.grbl_disconnect_btn.config(state=tk.NORMAL)
+            # Log at connection panel level (not duplicate of GRBL's internal logging)
+            self.log("GRBL connected successfully", "info")
         else:
             self.grbl_status_var.set("Connection Failed")
             self.grbl_connect_btn.config(state=tk.NORMAL)
             self.grbl_disconnect_btn.config(state=tk.DISABLED)
+            self.log("GRBL connection failed", "error")
 
     @event_handler(GRBLEvents.DISCONNECTED)
     def _on_grbl_disconnected(self):
-        """Handle GRBL disconnection"""
+        """Handle GRBL disconnection - UI updates only"""
         self.grbl_status_var.set("Disconnected")
         self.grbl_connect_btn.config(state=tk.NORMAL)
         self.grbl_disconnect_btn.config(state=tk.DISABLED)
+        self.log("GRBL disconnected", "info")
 
-    @event_handler(GRBLEvents.ERROR)
-    def _on_grbl_error(self, error_message: str):
-        """Handle GRBL errors/debug messages"""
-        # Filter out debug messages from actual errors
-        if "✅" in error_message or "Testing" in error_message:
-            # Debug info - optionally show in a separate debug area
-            pass
-        else:
-            # Actual error
-            self.log(f"GRBL Error: {error_message}", "error")
+    # REMOVED: GRBLEvents.ERROR handler to avoid duplicate logging
+    # GRBL controller now handles all its own internal logging
 
     def _setup_widgets(self):
         """Setup GRBL connection control widgets"""
@@ -218,6 +214,7 @@ class ConnectionPanel:
 
         def connect_thread():
             try:
+                # GRBL controller handles all its own logging now
                 success = self.grbl_controller.connect(port, baudrate)
 
                 # Update UI in main thread
@@ -230,9 +227,8 @@ class ConnectionPanel:
 
     def _grbl_connect_result(self, success):
         """Handle GRBL connection result in main thread"""
-        if success:
-            self.log("✅ GRBL connected successfully")
-        else:
+        if not success:
+            # Only log connection panel level errors, GRBL handles its own
             self.log("❌ Failed to connect to GRBL", "error")
             self.grbl_status_var.set("Connection Failed")
             self.grbl_connect_btn.config(state=tk.NORMAL)

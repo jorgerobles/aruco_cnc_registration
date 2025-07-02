@@ -1,6 +1,7 @@
 """
 Complete Main Window with Machine Area Integration
-Updated main_window.py with corrected panel constructors after UI reorganization
+FIXED: Removed duplicate GRBL event logging - debug panel handles it directly
+Clean separation of responsibilities between components
 """
 
 import time
@@ -89,7 +90,7 @@ class RegistrationGUI:
         else:
             print(f"[{level.upper()}] {message}")  # Fallback
 
-    # Event handlers using decorators - automatically registered!
+    # Event handlers using decorators - FIXED: Removed duplicate GRBL error handler
     @event_handler(CameraEvents.CONNECTED, EventPriority.HIGH)
     def _on_camera_connected(self, success: bool):
         """Handle camera connection event"""
@@ -145,12 +146,8 @@ class RegistrationGUI:
         self.log("GRBL disconnected", "info")
         self.status_var.set("GRBL disconnected")
 
-    @event_handler(GRBLEvents.ERROR)
-    def _on_grbl_error(self, error_message: str):
-        """Handle GRBL error event"""
-        # Use debug panel's GRBL event logger for proper filtering
-        if self.debug_panel:
-            self.debug_panel.log_grbl_event(error_message, "error")
+    # REMOVED: GRBLEvents.ERROR handler - debug panel handles this directly now
+    # This was causing the duplicate logging issue
 
     @event_handler(GRBLEvents.STATUS_CHANGED)
     def _on_grbl_status_changed(self, status: str):
@@ -884,6 +881,23 @@ class RegistrationGUI:
         except Exception as e:
             self.log(f"Error refreshing panels: {e}", "error")
 
+    def configure_grbl_logging(self, verbose: bool = False):
+        """Configure GRBL logging levels"""
+        if verbose:
+            # Enable verbose logging for troubleshooting
+            self.grbl_controller.enable_verbose_logging()
+            self.log("GRBL verbose logging enabled", "info")
+        else:
+            # Use quiet logging (default)
+            self.grbl_controller.enable_quiet_logging()
+            self.log("GRBL quiet logging enabled", "info")
+
+    def get_grbl_debug_settings(self):
+        """Get current GRBL debug settings"""
+        if self.grbl_controller:
+            return self.grbl_controller.get_debug_settings()
+        return {}
+
     def on_closing(self):
         """Handle application closing"""
         self.log("Application closing", "info")
@@ -916,6 +930,7 @@ class RegistrationGUI:
         self.root.destroy()
 
 
+
 def main():
     """Main application entry point"""
     try:
@@ -942,6 +957,9 @@ def main():
         y = (root.winfo_screenheight() // 2) - (height // 2)
         root.geometry(f'{width}x{height}+{x}+{y}')
 
+        # Configure GRBL logging (default to quiet mode)
+        app.configure_grbl_logging(verbose=False)
+
         # Start main loop
         print("Starting GRBL Camera Registration with Machine Area Visualization...")
         print("Keyboard shortcuts:")
@@ -949,6 +967,10 @@ def main():
         print("  F11: Center Machine Area View")
         print("  F12: Clear Movement Trail")
         print("  Right-click: Context Menu")
+        print("\nLogging Configuration:")
+        print("  - GRBL: Quiet mode (minimal logging)")
+        print("  - Debug Panel: Full event display with color coding")
+        print("  - Use app.configure_grbl_logging(verbose=True) for full GRBL debug")
 
         root.mainloop()
 
@@ -956,7 +978,3 @@ def main():
         print(f"Error starting application: {e}")
         import traceback
         traceback.print_exc()
-
-
-if __name__ == "__main__":
-    main()
