@@ -9,15 +9,41 @@ class CameraEvents:
 
 
 class GRBLEvents:
+    """GRBL event type constants"""
+
+    # Connection events
     CONNECTED = "grbl.connected"
     DISCONNECTED = "grbl.disconnected"
-    POSITION_CHANGED = "grbl.position_changed"
-    STATUS_CHANGED = "grbl.status_changed"
-    ERROR = "grbl.error"
-    COMMAND_SENT = "grbl.command_sent"
-    RESPONSE_RECEIVED = "grbl.response_received"
-    DEBUG_INFO = "grbl.debug_info"  # NEW: For GRBL internal debug messages
+    CONNECTION_LOST = "grbl.connection_lost"
 
+    # Command events
+    COMMAND_SENT = "grbl.command_sent"
+    COMMAND_COMPLETED = "grbl.command_completed"
+    COMMAND_FAILED = "grbl.command_failed"
+    COMMAND_TIMEOUT = "grbl.command_timeout"
+
+    # Response events
+    RESPONSE_RECEIVED = "grbl.response_received"
+
+    # Status events
+    STATUS_CHANGED = "grbl.status_changed"
+    POSITION_CHANGED = "grbl.position_changed"
+
+    # Error events
+    ERROR = "grbl.error"
+    WARNING = "grbl.warning"
+
+    # Debug events
+    DEBUG_INFO = "grbl.debug_info"
+
+    # System events
+    ALARM = "grbl.alarm"
+    RESET = "grbl.reset"
+    EMERGENCY_STOP = "grbl.emergency_stop"
+
+    # Settings events
+    SETTINGS_CHANGED = "grbl.settings_changed"
+    WORK_OFFSET_CHANGED = "grbl.work_offset_changed"
 
 class RegistrationEvents:
     POINT_ADDED = "registration.point_added"

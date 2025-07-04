@@ -1,5 +1,5 @@
 """
-GRBL Controller Debug GUI - FIXED VERSION
+GRBL Controller Debug GUI - UPDATED for new simplified controller
 Simple interface for testing async command functionality
 """
 
@@ -13,7 +13,7 @@ from typing import Dict, Any
 from concurrent.futures import Future
 
 # Import GRBL controller and event system
-from services.grbl_controller import GRBLController, CommandState
+from services.grbl_controller import GRBLController
 from services.event_broker import event_aware, event_handler, EventPriority
 from services.events import GRBLEvents
 
@@ -24,7 +24,7 @@ class GRBLDebugGUI:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("GRBL Controller Debug Interface")
+        self.root.title("GRBL Controller Debug Interface - New Simple Controller")
         self.root.geometry("1000x700")
 
         # GRBL Controller instance
@@ -78,7 +78,7 @@ class GRBLDebugGUI:
 
         # Port selection
         ttk.Label(conn_frame, text="Port:").grid(row=0, column=0, padx=(0, 5))
-        self.port_var = tk.StringVar(value="COM3")
+        self.port_var = tk.StringVar(value="/dev/ttyUSB0")
         port_entry = ttk.Entry(conn_frame, textvariable=self.port_var, width=10)
         port_entry.grid(row=0, column=1, padx=(0, 10))
 
@@ -150,7 +150,7 @@ class GRBLDebugGUI:
 
     def setup_jog_frame(self, parent):
         """Setup jog controls for testing movement commands"""
-        jog_frame = ttk.LabelFrame(parent, text="Jog Controls (Async Movement Testing)", padding="5")
+        jog_frame = ttk.LabelFrame(parent, text="Jog Controls (Movement Testing)", padding="5")
         jog_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
 
         # Distance and feed rate controls
@@ -171,18 +171,10 @@ class GRBLDebugGUI:
                                      width=8, state="normal")
         feedrate_combo.grid(row=0, column=3, padx=(0, 20))
 
-        # Jog mode selection
-        ttk.Label(settings_frame, text="Mode:").grid(row=0, column=4, padx=(0, 5))
-        self.jog_mode_var = tk.StringVar(value="Sync")
-        mode_combo = ttk.Combobox(settings_frame, textvariable=self.jog_mode_var,
-                                 values=["Sync", "Async"],
-                                 width=8, state="readonly")
-        mode_combo.grid(row=0, column=5, padx=(0, 20))
-
         # Emergency stop for jog operations
         self.jog_stop_btn = ttk.Button(settings_frame, text="STOP", command=self.emergency_stop_jog,
                                       state="disabled", style="Emergency.TButton")
-        self.jog_stop_btn.grid(row=0, column=6, padx=(10, 0))
+        self.jog_stop_btn.grid(row=0, column=4, padx=(10, 0))
 
         # Create emergency button style
         style = ttk.Style()
@@ -324,12 +316,17 @@ class GRBLDebugGUI:
         self.position_var = tk.StringVar(value="X:0.000 Y:0.000 Z:0.000")
         ttk.Label(info_frame, textvariable=self.position_var).grid(row=0, column=3, sticky=tk.W)
 
+        # Connection info
+        ttk.Label(info_frame, text="Controller:").grid(row=0, column=4, padx=(20, 5))
+        self.controller_var = tk.StringVar(value="Simple (No Threads)")
+        ttk.Label(info_frame, textvariable=self.controller_var).grid(row=0, column=5, sticky=tk.W)
+
         # Buffer status
         buffer_frame = ttk.Frame(status_frame)
         buffer_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(5, 0))
 
-        ttk.Label(buffer_frame, text="Buffer:").grid(row=0, column=0, padx=(0, 5))
-        self.buffer_var = tk.StringVar(value="Total:0 Pending:0 Sent:0 Completed:0")
+        ttk.Label(buffer_frame, text="Active Futures:").grid(row=0, column=0, padx=(0, 5))
+        self.buffer_var = tk.StringVar(value="0")
         ttk.Label(buffer_frame, textvariable=self.buffer_var).grid(row=0, column=1, sticky=tk.W)
 
         # Update buffer status periodically
@@ -408,10 +405,22 @@ class GRBLDebugGUI:
         threading.Thread(target=connect_thread, daemon=True).start()
 
     def disconnect_grbl(self):
-        """Disconnect from GRBL"""
+        """Disconnect from GRBL - should be immediate with new controller"""
         try:
+            start_time = time.time()
+            self.add_output("Starting disconnect...")
+
             self.grbl.disconnect()
-            self.add_output("Disconnected")
+
+            elapsed = time.time() - start_time
+            self.add_output(f"Disconnect completed in {elapsed:.3f}s")
+
+            # Check if properly disconnected
+            if self.grbl.is_properly_disconnected():
+                self.add_output("✅ Properly disconnected", 'green')
+            else:
+                self.add_output("⚠️ Disconnect may not be complete", 'orange')
+
         except Exception as e:
             self.add_output(f"Disconnect error: {e}", 'red')
 
@@ -504,19 +513,16 @@ class GRBLDebugGUI:
             )
 
     def update_buffer_status(self):
-        """Update buffer status display"""
+        """Update buffer status display for new controller"""
         try:
             if hasattr(self.grbl, 'get_buffer_status'):
                 status = self.grbl.get_buffer_status()
-                status_text = (f"Total:{status['total_commands']} "
-                             f"Pending:{status['pending']} "
-                             f"Sent:{status['sent']} "
-                             f"Completed:{status['completed']} "
-                             f"Error:{status['error']} "
-                             f"Timeout:{status['timeout']}")
-                self.buffer_var.set(status_text)
-        except:
-            pass
+                pending_futures = status.get('pending_futures', 0)
+                self.buffer_var.set(str(pending_futures))
+            else:
+                self.buffer_var.set("N/A")
+        except Exception as e:
+            self.buffer_var.set("Error")
 
         # Schedule next update
         self.root.after(1000, self.update_buffer_status)
@@ -582,11 +588,10 @@ class GRBLDebugGUI:
         self.root.after(50, self.update_gui)
 
     def jog_move(self, x=0, y=0, z=0):
-        """Execute a jog movement using relative positioning"""
+        """Execute a jog movement using relative positioning - FIXED"""
         try:
             distance = float(self.jog_distance_var.get())
             feed_rate = float(self.jog_feedrate_var.get())
-            mode = self.jog_mode_var.get()
 
             # Calculate actual distances
             x_dist = x * distance
@@ -603,55 +608,24 @@ class GRBLDebugGUI:
                 moves.append(f"Z{z_dist:+.1f}")
             move_desc = " ".join(moves) if moves else "No movement"
 
-            self.add_output(f"Jog {mode}: {move_desc} @ F{feed_rate}", 'blue')
+            self.add_output(f"Jog: {move_desc} @ F{feed_rate}", 'blue')
 
-            if mode == "Async":
-                # Use async jog for testing the async system
-                def async_jog():
-                    try:
-                        start_time = time.time()
-                        responses = self.grbl.move_relative(x_dist, y_dist, z_dist, feed_rate)
-                        elapsed = time.time() - start_time
+            def jog_thread():
+                try:
+                    start_time = time.time()
+                    # Use the simplified jog_relative method
+                    success = self.grbl.jog_relative(x_dist, y_dist, z_dist, feed_rate)
+                    elapsed = time.time() - start_time
 
-                        success = any("ok" in str(response).lower() for response in responses)
-                        result = "completed" if success else "failed"
+                    result = "completed" if success else "failed"
+                    self.gui_queue.put(('output',
+                                      f"Jog {result} in {elapsed:.3f}s: {move_desc}",
+                                      'green' if success else 'red'))
 
-                        self.gui_queue.put(('output',
-                                          f"Async jog {result} in {elapsed:.3f}s: {move_desc}",
-                                          'green' if success else 'red'))
+                except Exception as e:
+                    self.gui_queue.put(('output', f"Jog error: {e}", 'red'))
 
-                        if not success:
-                            for response in responses:
-                                if "error" in str(response).lower():
-                                    self.gui_queue.put(('output', f"  Error: {response}", 'red'))
-
-                    except Exception as e:
-                        self.gui_queue.put(('output', f"Async jog error: {e}", 'red'))
-
-                threading.Thread(target=async_jog, daemon=True).start()
-
-            else:
-                # Synchronous jog
-                def sync_jog():
-                    try:
-                        start_time = time.time()
-                        success = self.grbl.move_to(
-                            x=self.grbl.current_position[0] + x_dist if x_dist != 0 else None,
-                            y=self.grbl.current_position[1] + y_dist if y_dist != 0 else None,
-                            z=self.grbl.current_position[2] + z_dist if z_dist != 0 else None,
-                            feed_rate=feed_rate
-                        )
-                        elapsed = time.time() - start_time
-
-                        result = "completed" if success else "failed"
-                        self.gui_queue.put(('output',
-                                          f"Sync jog {result} in {elapsed:.3f}s: {move_desc}",
-                                          'green' if success else 'red'))
-
-                    except Exception as e:
-                        self.gui_queue.put(('output', f"Sync jog error: {e}", 'red'))
-
-                threading.Thread(target=sync_jog, daemon=True).start()
+            threading.Thread(target=jog_thread, daemon=True).start()
 
         except ValueError as e:
             self.add_output(f"Invalid jog parameters: {e}", 'red')
@@ -661,7 +635,9 @@ class GRBLDebugGUI:
     def xy_home(self):
         """Home X and Y axes to current Z"""
         try:
-            current_z = self.grbl.current_position[2]
+            # Get current position first
+            position = self.grbl.get_position()
+            current_z = position[2]
             self.add_output(f"XY Home to (0, 0, {current_z:.3f})", 'orange')
 
             def home_xy():
@@ -724,7 +700,10 @@ class GRBLDebugGUI:
     def on_closing(self):
         """Handle window closing"""
         try:
+            start_time = time.time()
             self.grbl.disconnect()
+            elapsed = time.time() - start_time
+            print(f"Window close disconnect took {elapsed:.3f}s")
         except:
             pass
         self.root.destroy()
