@@ -16,7 +16,7 @@ from services.events import GRBLEvents
 
 
 @event_aware()
-class ConnectionPanel:
+class MachinePanel:
     """Compact connection controls focused only on GRBL device connections"""
 
     def __init__(self, parent, grbl_controller, logger: Optional[Callable] = None):
@@ -85,6 +85,11 @@ class ConnectionPanel:
         self.port_combo = ttk.Combobox(port_frame, textvariable=self.grbl_port_var, width=15)
         self.port_combo.pack(side=tk.LEFT, padx=(5, 0))
 
+        ttk.Label(port_frame, text="Baudrate:").pack(side=tk.LEFT)
+        baud_combo = ttk.Combobox(port_frame, textvariable=self.grbl_baudrate_var,
+                                  values=["9600", "38400", "57600", "115200"], width=10)
+        baud_combo.pack(side=tk.LEFT, padx=(5, 0))
+
         ttk.Button(port_frame, text="🔄", command=self._refresh_ports, width=3).pack(side=tk.LEFT, padx=(2, 0))
         ttk.Button(port_frame, text="🔍", command=self._diagnose_grbl, width=3).pack(side=tk.LEFT, padx=(2, 0))
 
@@ -92,22 +97,19 @@ class ConnectionPanel:
         baud_frame = ttk.Frame(grbl_frame)
         baud_frame.pack(fill=tk.X, pady=2)
 
-        ttk.Label(baud_frame, text="Baudrate:").pack(side=tk.LEFT)
-        baud_combo = ttk.Combobox(baud_frame, textvariable=self.grbl_baudrate_var,
-                                  values=["9600", "38400", "57600", "115200"], width=10)
-        baud_combo.pack(side=tk.LEFT, padx=(5, 0))
+
 
         # Status and controls
         status_frame = ttk.Frame(grbl_frame)
         status_frame.pack(fill=tk.X, pady=2)
 
-        ttk.Label(status_frame, text="Status:").pack(side=tk.LEFT)
-        status_label = ttk.Label(status_frame, textvariable=self.grbl_status_var, foreground="red")
-        status_label.pack(side=tk.LEFT, padx=(5, 0))
+
+
 
         # Connect/disconnect buttons
         button_frame = ttk.Frame(grbl_frame)
         button_frame.pack(fill=tk.X, pady=2)
+
 
         self.grbl_connect_btn = ttk.Button(button_frame, text="Connect GRBL", command=self.connect_grbl)
         self.grbl_connect_btn.pack(side=tk.LEFT, padx=(0, 5))
@@ -115,6 +117,9 @@ class ConnectionPanel:
         self.grbl_disconnect_btn = ttk.Button(button_frame, text="Disconnect", command=self.disconnect_grbl,
                                               state=tk.DISABLED)
         self.grbl_disconnect_btn.pack(side=tk.LEFT)
+        ttk.Label(button_frame, text="Status:").pack(side=tk.LEFT)
+        status_label = ttk.Label(button_frame, textvariable=self.grbl_status_var, foreground="red")
+        status_label.pack(side=tk.LEFT, padx=(5, 0))
 
     def _refresh_ports(self):
         """Refresh available serial ports"""

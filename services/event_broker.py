@@ -3,11 +3,10 @@ EventBroker - Enhanced with class decorator for automatic injection
 Eliminates the need to manually pass event_broker instances around
 """
 
-from typing import Callable, Dict, List, Any, Optional, Type, Union
-from functools import wraps
 import threading
 from enum import Enum, auto
-import weakref
+from functools import wraps
+from typing import Callable, Dict, List, Any, Optional, Type
 
 
 class EventPriority(Enum):
@@ -117,7 +116,7 @@ class EventBroker:
             # Find and remove subscriber
             for i, sub in enumerate(subscribers):
                 if (subscription_id and sub['subscription_id'] == subscription_id) or \
-                   (callback and sub['callback'] == callback):
+                        (callback and sub['callback'] == callback):
                     removed_sub = subscribers.pop(i)
                     self._log(f"Unsubscribed from '{event_type}'")
                     return True
@@ -194,6 +193,7 @@ def event_aware(broker_name: str = "default"):
         class MyOtherClass:
             pass
     """
+
     def decorator(cls: Type) -> Type:
         # Store original __init__
         original_init = cls.__init__
@@ -277,16 +277,19 @@ def event_handler(event_type: str, priority: EventPriority = EventPriority.NORMA
     Decorator for automatically registering event handlers
     Usage: @event_handler('camera.connected')
     """
+
     def decorator(func):
         func._event_type = event_type
         func._event_priority = priority
         return func
+
     return decorator
 
 
 # Legacy support - these classes are now optional but kept for backwards compatibility
 class EventPublisher:
     """Legacy EventPublisher - use @event_aware decorator instead"""
+
     def __init__(self, event_broker: EventBroker = None):
         self._event_broker = event_broker or EventBroker.get_default()
 
@@ -302,6 +305,7 @@ class EventPublisher:
 
 class EventSubscriber:
     """Legacy EventSubscriber - use @event_aware decorator instead"""
+
     def __init__(self, event_broker: EventBroker = None):
         self._event_broker = event_broker or EventBroker.get_default()
         self._subscriptions: List[tuple] = []

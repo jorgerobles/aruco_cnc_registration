@@ -11,8 +11,8 @@ from typing import List
 import numpy as np
 
 from gui.window_machine_area import EnhancedMachineAreaWindow
-from gui.panel_connection import ConnectionPanel
-from gui.panel_calibration import CameraPanel
+from gui.panel_machine import MachinePanel
+from gui.panel_camera import CameraPanel
 from gui.panel_jogger import JogPanel
 from gui.panel_registration import RegistrationPanel
 from gui.panel_svg import SVGRoutesPanel
@@ -262,7 +262,7 @@ class RegistrationGUI:
         scrollbar.pack(side="right", fill="y")
 
 
-        self.connection_panel = ConnectionPanel(scrollable_frame, self.grbl_controller)
+        self.connection_panel = MachinePanel(scrollable_frame, self.grbl_controller)
 
         # CameraPanel handles all camera functionality
         self.calibration_panel = CameraPanel(scrollable_frame, self.camera_manager)

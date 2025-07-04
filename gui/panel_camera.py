@@ -3,10 +3,9 @@ Compact CameraPanel with camera connection controls and calibration features
 Streamlined UI with combined sections for better space efficiency
 """
 
+import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import numpy as np
-import threading
 from typing import Callable, Optional
 
 # Import event system
@@ -66,26 +65,21 @@ class CameraPanel:
 
         # Status with colored indicator
         self.cam_status_label = ttk.Label(cam_frame, textvariable=self.camera_status_var,
-                                         foreground="red", font=("TkDefaultFont", 8))
+                                          foreground="red", font=("TkDefaultFont", 8))
         self.cam_status_label.pack(side=tk.LEFT, padx=(5, 0))
 
-        # === Camera Control Buttons ===
-        btn_frame = ttk.Frame(self.frame)
-        btn_frame.pack(fill=tk.X, pady=1, padx=3)
 
-        self.camera_connect_btn = ttk.Button(btn_frame, text="Connect",
-                                           command=self.connect_camera, width=8)
+
+        self.camera_connect_btn = ttk.Button(cam_frame, text="Connect",
+                                             command=self.connect_camera, width=8)
         self.camera_connect_btn.pack(side=tk.LEFT, padx=(0, 2))
 
-        self.camera_disconnect_btn = ttk.Button(btn_frame, text="Disconnect",
-                                              command=self.disconnect_camera, width=8, state=tk.DISABLED)
+        self.camera_disconnect_btn = ttk.Button(cam_frame, text="Disconnect",
+                                                command=self.disconnect_camera, width=8, state=tk.DISABLED)
         self.camera_disconnect_btn.pack(side=tk.LEFT, padx=(0, 2))
 
-        ttk.Button(btn_frame, text="🔍", command=self._diagnose_camera, width=3).pack(side=tk.LEFT, padx=(0, 2))
-        ttk.Button(btn_frame, text="Test", command=self._test_camera_quick, width=6).pack(side=tk.LEFT)
-
-        # === Separator ===
-        ttk.Separator(self.frame, orient='horizontal').pack(fill=tk.X, pady=2)
+        ttk.Button(cam_frame, text="🔍", command=self._diagnose_camera, width=3).pack(side=tk.LEFT, padx=(0, 2))
+        ttk.Button(cam_frame, text="Test", command=self._test_camera_quick, width=6).pack(side=tk.LEFT)
 
         # === Calibration Row ===
         calib_frame = ttk.Frame(self.frame)
@@ -98,19 +92,17 @@ class CameraPanel:
 
         # Calibration status (compact)
         self.calib_status_label = ttk.Label(calib_frame, textvariable=self.calibration_file_var,
-                                           foreground="red", font=("TkDefaultFont", 7))
+                                            foreground="red", font=("TkDefaultFont", 7))
         self.calib_status_label.pack(side=tk.LEFT, padx=(5, 0))
 
-        # === Calibration Control Buttons ===
-        calib_btn_frame = ttk.Frame(self.frame)
-        calib_btn_frame.pack(fill=tk.X, pady=1, padx=3)
 
-        self.load_calib_btn = ttk.Button(calib_btn_frame, text="Load Calibration",
-                                        command=self.load_calibration, width=14)
+
+        self.load_calib_btn = ttk.Button(calib_frame, text="Load Calibration",
+                                         command=self.load_calibration, width=14)
         self.load_calib_btn.pack(side=tk.LEFT, padx=(0, 2))
 
-        self.info_btn = ttk.Button(calib_btn_frame, text="Info",
-                                  command=self._show_camera_info, width=6)
+        self.info_btn = ttk.Button(calib_frame, text="Info",
+                                   command=self._show_camera_info, width=6)
         self.info_btn.pack(side=tk.LEFT)
 
     def _set_calibration_controls_enabled(self, enabled: bool):
@@ -199,6 +191,7 @@ class CameraPanel:
 
     def _diagnose_camera(self):
         """Run camera diagnostics"""
+
         def diagnose():
             try:
                 camera_id = int(self.camera_id_var.get())
@@ -225,9 +218,10 @@ class CameraPanel:
             if self.camera_manager.is_connected:
                 info = self.camera_manager.get_camera_info()
                 self.log(f"Camera: ID={info['camera_id']}, {info['width']}x{info['height']}, "
-                        f"Cal={'Yes' if info['calibrated'] else 'No'}")
+                         f"Cal={'Yes' if info['calibrated'] else 'No'}")
             else:
                 camera_id = int(self.camera_id_var.get())
+
                 def test():
                     try:
                         import cv2
@@ -242,6 +236,7 @@ class CameraPanel:
                             self.log(f"Test: Camera {camera_id} unavailable", "error")
                     except Exception as e:
                         self.log(f"Test failed: {e}", "error")
+
                 threading.Thread(target=test, daemon=True).start()
         except Exception as e:
             self.log(f"Test error: {e}", "error")
@@ -285,7 +280,7 @@ Status: {'Ready' if info.get('calibrated', False) else 'Load calibration needed'
                 info = self.camera_manager.get_camera_info()
                 status = "Ready" if info.get('calibrated', False) else "Need calibration"
                 self.log(f"Camera: {info.get('camera_id')} | {info.get('width')}x{info.get('height')} | "
-                        f"Marker: {self.marker_length_var.get():.1f}mm | {status}")
+                         f"Marker: {self.marker_length_var.get():.1f}mm | {status}")
         except Exception as e:
             self.log(f"Info error: {e}", "error")
 

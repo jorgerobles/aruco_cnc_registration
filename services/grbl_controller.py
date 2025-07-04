@@ -5,11 +5,12 @@ NO BACKGROUND THREADS - Immediate operations only
 FIXED: Simplified jogging and better position tracking
 """
 
-import serial
 import time
-import threading
-from typing import List, Optional, Dict, Any
 from concurrent.futures import Future
+from typing import List, Optional, Dict, Any
+
+import serial
+
 from services.event_broker import event_aware, event_handler, EventPriority
 from services.events import GRBLEvents
 
@@ -149,10 +150,6 @@ class GRBLController:
         # Track the future
         future_id = id(future)
         self._active_futures[future_id] = future
-
-        # Execute in background thread
-        thread = threading.Thread(target=execute, daemon=True)
-        thread.start()
 
         return future
 
@@ -344,7 +341,7 @@ class GRBLController:
             command = f"G10 L2 P{coordinate_system} X{position[0]:.3f} Y{position[1]:.3f} Z{position[2]:.3f}"
             responses = self.send_command(command, 5.0)
 
-            self._log(f"Work offset G5{3+coordinate_system} set to {position}")
+            self._log(f"Work offset G5{3 + coordinate_system} set to {position}")
             return responses
 
         except Exception as e:
@@ -580,10 +577,10 @@ class GRBLController:
                 for response in responses:
                     # Look for GRBL-specific responses
                     if (response.startswith('<') or
-                        response.startswith('Grbl') or
-                        response.startswith('$') or
-                        response.startswith('[') or
-                        response == 'ok'):
+                            response.startswith('Grbl') or
+                            response.startswith('$') or
+                            response.startswith('[') or
+                            response == 'ok'):
                         self._log(f"✅ GRBL detected: {response}")
                         return True
 
