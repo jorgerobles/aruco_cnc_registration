@@ -10,6 +10,7 @@ from tkinter import ttk, scrolledtext
 from typing import List
 import numpy as np
 
+from gui.panel_commands import GRBLCommandPanel
 from gui.window_machine_area import EnhancedMachineAreaWindow
 from gui.panel_machine import MachinePanel
 from gui.panel_camera import CameraPanel
@@ -25,6 +26,7 @@ from services.grbl_controller import GRBLController
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
 from services.overlays.svg_routes_overlay import SVGRoutesOverlay
 from services.registration_manager import RegistrationManager
+from gui.panel_machine_area import MachineAreaPanel
 
 
 @event_aware()
@@ -34,7 +36,7 @@ class RegistrationGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("GRBL Camera Registration with Machine Area Visualization")
-        self.root.geometry("1400x900")
+        self.root.geometry("1600x900")
 
         # Initialize GUI state FIRST (before any event system setup)
         self.status_var = None
@@ -47,10 +49,12 @@ class RegistrationGUI:
         self.registration_panel = None
         self.calibration_panel = None
         self.debug_panel = None
+        self.machine_area_panel = None
 
         # Machine area window (will be initialized later)
         self.machine_area_window = None
         self.machine_area_toggle_button = None
+
 
         # Set up event broker logging (using the decorator's broker)
         self.setup_event_logging()
@@ -74,6 +78,47 @@ class RegistrationGUI:
         broker = EventBroker.get_default()
         broker._enable_logging = True
         broker.set_logger(self._event_log)
+
+    def setup_command_panel(self, parent):
+        """Setup GRBL command panel"""
+        try:
+            self.command_panel = GRBLCommandPanel(parent, self.grbl_controller, self.log)
+            self.log("GRBL Command Panel initialized")
+        except Exception as e:
+            self.log(f"Error setting up command panel: {e}", "error")
+            self.command_panel = None
+
+    def setup_machine_area_panel(self, parent):
+        """Setup machine area control panel directly in layout"""
+        try:
+            # Create machine area panel
+            self.machine_area_panel = MachineAreaPanel(parent, self.machine_area_window, self.log)
+
+            # Set callbacks (machine_area_window might not exist yet, will be set later)
+            self.machine_area_panel.set_callbacks(
+                self.toggle_machine_area_window,
+                self.set_machine_bounds_quick
+            )
+
+            self.log("Machine area panel initialized in main layout")
+
+        except Exception as e:
+            self.log(f"Error setting up machine area panel: {e}", "error")
+            self.machine_area_panel = None
+
+    def toggle_machine_area_window(self):
+        """Toggle machine area window"""
+        if hasattr(self, 'machine_area_window') and self.machine_area_window:
+            if self.machine_area_window.is_visible:
+                self.machine_area_window.hide_window()
+                self.log("Machine area window hidden")
+            else:
+                self.machine_area_window.show_window()
+                self.log("Machine area window shown")
+
+            # Update panel button
+            if self.machine_area_panel:
+                self.machine_area_panel.update_toggle_button(self.machine_area_window.is_visible)
 
     def _event_log(self, message: str, level: str = "info"):
         """Logger for event broker - direct to debug panel to avoid circular dependency"""
@@ -234,9 +279,19 @@ class RegistrationGUI:
         debug_frame = ttk.LabelFrame(right_panel, text="Debug Console")
         right_panel.add(debug_frame, weight=0)
 
+        # Command frame (bottom of right panel) - NEW
+        command_frame = ttk.Frame(right_panel)
+        right_panel.add(command_frame, weight=0)
+
+        # Machine area frame (in bottom container) - NEW
+        machine_area_frame = ttk.Frame(right_panel)
+        machine_area_frame.pack(fill=tk.X, pady=(0, 5))
+
         self.setup_control_panel(left_panel)
         self.setup_display_panel(display_frame)
         self.setup_debug_panel(debug_frame)
+        self.setup_command_panel(command_frame)
+        self.setup_machine_area_panel(machine_area_frame)
 
         # Status bar
         self.status_var = tk.StringVar(value="Ready")
@@ -893,12 +948,20 @@ class RegistrationGUI:
             self.machine_area_window.cleanup()
             self.log("Machine area window cleaned up")
 
-        # Clean up machine area control window if it exists
-        if hasattr(self, 'machine_area_control_window'):
-            try:
-                self.machine_area_control_window.destroy()
-            except:
-                pass
+        # Clean up command panel
+        if hasattr(self, 'command_panel') and self.command_panel:
+            self.command_panel.cleanup_subscriptions()
+            self.log("Command panel cleaned up")
+
+
+        if hasattr(self, 'machine_area_panel') and self.machine_area_panel:
+            self.machine_area_panel.cleanup_subscriptions()
+            self.log("Machine area panel cleaned up")
+
+            # Clean up machine area window
+        if hasattr(self, 'machine_area_control_window') and self.machine_area_window:
+            self.machine_area_control_window.cleanup()
+            self.log("Machine area window cleaned up")
 
         # Clean up event subscriptions
         self.cleanup_subscriptions()
