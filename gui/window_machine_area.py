@@ -3,16 +3,16 @@ Enhanced Machine Area Visualization Window with Camera Frame Display
 Shows camera frame bounds based on resolution and calibration
 """
 
-import tkinter as tk
-from tkinter import ttk
-import numpy as np
-from typing import Optional, Tuple, List, Callable
 import threading
 import time
+import tkinter as tk
+from tkinter import ttk
+from typing import Optional, Tuple, List, Callable
+
+import numpy as np
 
 from services.camera_manager import CameraEvents
 from services.event_broker import event_aware, event_handler
-
 from services.grbl_controller import GRBLEvents
 from services.registration_manager import RegistrationEvents
 
@@ -21,7 +21,8 @@ from services.registration_manager import RegistrationEvents
 class MachineAreaWindow:
     """Floating window displaying machine area, routes, camera position and frame bounds"""
 
-    def __init__(self, parent_window, grbl_controller, registration_manager, routes_service, camera_manager=None, logger: Optional[Callable] = None):
+    def __init__(self, parent_window, grbl_controller, registration_manager, routes_service, camera_manager=None,
+                 logger: Optional[Callable] = None):
         self.parent_window = parent_window
         self.grbl_controller = grbl_controller
         self.registration_manager = registration_manager
@@ -42,7 +43,7 @@ class MachineAreaWindow:
         self.machine_bounds = {
             'x_min': 0.0, 'x_max': 200.0,  # 200mm X travel
             'y_min': 0.0, 'y_max': 200.0,  # 200mm Y travel
-            'z_min': 0.0, 'z_max': 50.0    # 50mm Z travel (for reference)
+            'z_min': 0.0, 'z_max': 50.0  # 50mm Z travel (for reference)
         }
 
         # Display configuration
@@ -67,10 +68,10 @@ class MachineAreaWindow:
         # Display settings
         self.show_machine_bounds = True
         self.show_routes = True
-        self.show_route_paths = True   # New: show actual route paths
+        self.show_route_paths = True  # New: show actual route paths
         self.show_camera_position = True
         self.show_camera_bounds = True  # Legacy camera FOV
-        self.show_camera_frame = True   # New: actual camera frame based on resolution
+        self.show_camera_frame = True  # New: actual camera frame based on resolution
         self.show_calibration_points = True
         self.show_grid = True
         self.show_coordinates = True
@@ -86,8 +87,8 @@ class MachineAreaWindow:
             'routes': '#f5a623',
             'machine_position': '#d0021b',
             'camera_position': '#7ed321',
-            'camera_bounds': '#50e3c2',      # Legacy FOV
-            'camera_frame': '#ff6b35',       # New: actual camera frame
+            'camera_bounds': '#50e3c2',  # Legacy FOV
+            'camera_frame': '#ff6b35',  # New: actual camera frame
             'calibration_points': '#9013fe',
             'grid': '#404040',
             'text': '#ffffff'
@@ -258,35 +259,35 @@ class MachineAreaWindow:
 
         self.show_machine_bounds_var = tk.BooleanVar(value=self.show_machine_bounds)
         ttk.Checkbutton(scrollable_frame, text="Machine Bounds", variable=self.show_machine_bounds_var,
-                       command=self.on_display_option_changed).pack(anchor=tk.W)
+                        command=self.on_display_option_changed).pack(anchor=tk.W)
 
         self.show_routes_var = tk.BooleanVar(value=self.show_routes)
         ttk.Checkbutton(scrollable_frame, text="Routes Bounds", variable=self.show_routes_var,
-                       command=self.on_display_option_changed).pack(anchor=tk.W)
+                        command=self.on_display_option_changed).pack(anchor=tk.W)
 
         self.show_route_paths_var = tk.BooleanVar(value=self.show_route_paths)
         ttk.Checkbutton(scrollable_frame, text="Route Paths", variable=self.show_route_paths_var,
-                       command=self.on_display_option_changed).pack(anchor=tk.W)
+                        command=self.on_display_option_changed).pack(anchor=tk.W)
 
         self.show_camera_position_var = tk.BooleanVar(value=self.show_camera_position)
         ttk.Checkbutton(scrollable_frame, text="Camera Position", variable=self.show_camera_position_var,
-                       command=self.on_display_option_changed).pack(anchor=tk.W)
+                        command=self.on_display_option_changed).pack(anchor=tk.W)
 
         self.show_camera_bounds_var = tk.BooleanVar(value=self.show_camera_bounds)
         ttk.Checkbutton(scrollable_frame, text="Camera FOV (Legacy)", variable=self.show_camera_bounds_var,
-                       command=self.on_display_option_changed).pack(anchor=tk.W)
+                        command=self.on_display_option_changed).pack(anchor=tk.W)
 
         self.show_camera_frame_var = tk.BooleanVar(value=self.show_camera_frame)
         ttk.Checkbutton(scrollable_frame, text="Camera Frame", variable=self.show_camera_frame_var,
-                       command=self.on_display_option_changed).pack(anchor=tk.W)
+                        command=self.on_display_option_changed).pack(anchor=tk.W)
 
         self.show_calibration_points_var = tk.BooleanVar(value=self.show_calibration_points)
         ttk.Checkbutton(scrollable_frame, text="Calibration Points", variable=self.show_calibration_points_var,
-                       command=self.on_display_option_changed).pack(anchor=tk.W)
+                        command=self.on_display_option_changed).pack(anchor=tk.W)
 
         self.show_grid_var = tk.BooleanVar(value=self.show_grid)
         ttk.Checkbutton(scrollable_frame, text="Grid", variable=self.show_grid_var,
-                       command=self.on_display_option_changed).pack(anchor=tk.W)
+                        command=self.on_display_option_changed).pack(anchor=tk.W)
 
         # Separator
         ttk.Separator(scrollable_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
@@ -314,7 +315,8 @@ class MachineAreaWindow:
         self.resolution_label = ttk.Label(camera_frame, text="640x480")
         self.resolution_label.grid(row=2, column=1, padx=(5, 0), sticky=tk.W)
 
-        ttk.Button(camera_frame, text="Update", command=self.on_camera_config_changed).grid(row=3, column=0, columnspan=2, pady=5)
+        ttk.Button(camera_frame, text="Update", command=self.on_camera_config_changed).grid(row=3, column=0,
+                                                                                            columnspan=2, pady=5)
 
         # Separator
         ttk.Separator(scrollable_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
@@ -337,14 +339,15 @@ class MachineAreaWindow:
         y_max_entry.grid(row=1, column=1, padx=(5, 0))
         y_max_entry.bind('<Return>', self.on_bounds_changed)
 
-        ttk.Button(bounds_frame, text="Update", command=self.on_bounds_changed).grid(row=2, column=0, columnspan=2, pady=5)
+        ttk.Button(bounds_frame, text="Update", command=self.on_bounds_changed).grid(row=2, column=0, columnspan=2,
+                                                                                     pady=5)
 
         # Update controls
         ttk.Separator(scrollable_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
 
         self.auto_update_var = tk.BooleanVar(value=self.auto_update)
         ttk.Checkbutton(scrollable_frame, text="Auto Update", variable=self.auto_update_var,
-                       command=self.on_auto_update_changed).pack(anchor=tk.W)
+                        command=self.on_auto_update_changed).pack(anchor=tk.W)
 
         ttk.Button(scrollable_frame, text="Refresh Now", command=self.manual_update).pack(fill=tk.X, pady=2)
         ttk.Button(scrollable_frame, text="Center View", command=self.center_view).pack(fill=tk.X, pady=2)
@@ -375,7 +378,8 @@ class MachineAreaWindow:
                 debug_info.append(f"Error getting service status: {e}")
 
         if self.actual_routes:
-            debug_info.append(f"First route sample: {self.actual_routes[0][:3] if len(self.actual_routes[0]) > 3 else self.actual_routes[0]}")
+            debug_info.append(
+                f"First route sample: {self.actual_routes[0][:3] if len(self.actual_routes[0]) > 3 else self.actual_routes[0]}")
 
         debug_text = "\n".join(debug_info)
         self.log(f"DEBUG DATA STATE:\n{debug_text}", "info")
@@ -548,22 +552,19 @@ class MachineAreaWindow:
                 try:
                     # Add a simple rate limiting mechanism
                     current_time = time.time()
-                    if not hasattr(self, '_last_grbl_update') or (current_time - self._last_grbl_update) > 0.5:  # Max 2Hz for GRBL updates
+                    if not hasattr(self, '_last_grbl_update') or (
+                            current_time - self._last_grbl_update) > 0.5:  # Max 2Hz for GRBL updates
                         position = self.grbl_controller.get_position()
                         if position:
                             self.current_machine_position = np.array(position[:3])
                         self._last_grbl_update = current_time
                 except Exception as e:
                     # Don't log every timeout error to avoid spam
-                    if not hasattr(self, '_last_grbl_error_time') or (current_time - getattr(self, '_last_grbl_error_time', 0)) > 10.0:
+                    if not hasattr(self, '_last_grbl_error_time') or (
+                            current_time - getattr(self, '_last_grbl_error_time', 0)) > 10.0:
                         self.log(f"GRBL communication error in machine area window: {e}", "warning")
                         self._last_grbl_error_time = current_time
 
-            # Debug: Log routes service status
-            if self.routes_service:
-                self.log(f"Routes service available: {type(self.routes_service).__name__}", "debug")
-            else:
-                self.log("No routes service available", "debug")
 
             # Update camera position from routes service OR camera manager
             camera_position_updated = False
@@ -575,7 +576,8 @@ class MachineAreaWindow:
                     if camera_position:
                         self.current_camera_position = camera_position
                         camera_position_updated = True
-                        self.log(f"Camera position updated from routes service: {self.current_camera_position}", "debug")
+                        self.log(f"Camera position updated from routes service: {self.current_camera_position}",
+                                 "debug")
 
                         # Calculate camera field of view bounds (legacy)
                         self.update_camera_bounds()
@@ -614,30 +616,17 @@ class MachineAreaWindow:
                 self.current_camera_position = None
                 self.camera_view_bounds = None
                 self.camera_frame_bounds = None
-                self.log("No camera position available - cleared camera bounds", "debug")
 
             # Update routes bounds and actual routes from routes service
             if self.routes_service:
                 try:
                     # Get route bounds
                     self.routes_bounds = self.routes_service.get_route_bounds()
-                    self.log(f"Route bounds from service: {self.routes_bounds}", "debug")
 
                     # Get actual routes
                     self.actual_routes = self.routes_service.get_routes()
-                    self.log(f"Routes from service: {len(self.actual_routes)} routes", "debug")
-
-                    if self.actual_routes:
-                        for i, route in enumerate(self.actual_routes[:3]):  # Log first 3 routes
-                            if route and len(route) > 0:
-                                self.log(f"Route {i}: {len(route)} points, first point: {route[0] if route else 'empty'}", "debug")
-                            else:
-                                self.log(f"Route {i}: empty or invalid", "debug")
-                    else:
-                        self.log("No routes found in service", "debug")
 
                 except Exception as e:
-                    self.log(f"Error getting routes data from service: {e}", "error")
                     self.routes_bounds = None
                     self.actual_routes = []
             else:
@@ -698,7 +687,8 @@ class MachineAreaWindow:
                 'height_mm': frame_height_mm
             }
 
-            self.log(f"Camera frame: {frame_width_mm:.1f}x{frame_height_mm:.1f}mm at ({cam_x:.1f},{cam_y:.1f})", "debug")
+            self.log(f"Camera frame: {frame_width_mm:.1f}x{frame_height_mm:.1f}mm at ({cam_x:.1f},{cam_y:.1f})",
+                     "debug")
 
         except Exception as e:
             self.log(f"Error updating camera frame bounds: {e}", "error")
@@ -796,7 +786,7 @@ class MachineAreaWindow:
         # Add coordinate labels
         self.canvas.create_text(x1 + 5, y1 - 5, text="(0,0)", fill=self.colors['text'], anchor=tk.SW)
         self.canvas.create_text(x2 - 5, y2 + 5, text=f"({self.machine_bounds['x_max']},{self.machine_bounds['y_max']})",
-                               fill=self.colors['text'], anchor=tk.NE)
+                                fill=self.colors['text'], anchor=tk.NE)
 
     def draw_routes(self):
         """Draw loaded routes"""
@@ -810,7 +800,8 @@ class MachineAreaWindow:
                 x2, y2 = self.machine_to_canvas(self.routes_bounds[2], self.routes_bounds[3])
 
                 # Draw routes bounding box
-                self.canvas.create_rectangle(x1, y2, x2, y1, outline=self.colors['routes'], width=2, fill="", dash=(5, 5))
+                self.canvas.create_rectangle(x1, y2, x2, y1, outline=self.colors['routes'], width=2, fill="",
+                                             dash=(5, 5))
 
                 # Add routes label
                 center_x = (x1 + x2) // 2
@@ -824,60 +815,47 @@ class MachineAreaWindow:
     def draw_actual_routes(self):
         """Draw actual route paths"""
         if not self.actual_routes:
-            self.log("No actual routes to draw", "debug")
             return
 
-        self.log(f"Drawing {len(self.actual_routes)} routes", "debug")
+        for route_idx, route in enumerate(self.actual_routes):
+            if len(route) < 2:
+                continue
 
-        try:
-            for route_idx, route in enumerate(self.actual_routes):
-                if len(route) < 2:
-                    self.log(f"Route {route_idx} has less than 2 points, skipping", "debug")
-                    continue
+            # Use different colors for different routes
+            color = self.route_colors[route_idx % len(self.route_colors)]
 
-                # Use different colors for different routes
-                color = self.route_colors[route_idx % len(self.route_colors)]
+            # Convert route points to canvas coordinates
+            canvas_points = []
+            for point in route:
+                # Handle different point formats
+                if len(point) >= 2:
+                    x, y = point[0], point[1]
+                    canvas_x, canvas_y = self.machine_to_canvas(x, y)
+                    canvas_points.extend([canvas_x, canvas_y])
 
-                # Convert route points to canvas coordinates
-                canvas_points = []
-                for point in route:
-                    # Handle different point formats
-                    if len(point) >= 2:
-                        x, y = point[0], point[1]
-                        canvas_x, canvas_y = self.machine_to_canvas(x, y)
-                        canvas_points.extend([canvas_x, canvas_y])
+            if len(canvas_points) >= 4:  # At least 2 points
 
-                if len(canvas_points) >= 4:  # At least 2 points
-                    self.log(f"Drawing route {route_idx} with {len(canvas_points)//2} points in color {color}", "debug")
+                # Draw route as connected lines
+                self.canvas.create_line(*canvas_points, fill=color, width=2, smooth=True)
 
-                    # Draw route as connected lines
-                    self.canvas.create_line(*canvas_points, fill=color, width=2, smooth=True)
+                # Draw start point
+                if canvas_points:
+                    start_x, start_y = canvas_points[0], canvas_points[1]
+                    self.canvas.create_oval(start_x - 3, start_y - 3, start_x + 3, start_y + 3,
+                                            fill='green', outline='white', width=1)
 
-                    # Draw start point
-                    if canvas_points:
-                        start_x, start_y = canvas_points[0], canvas_points[1]
-                        self.canvas.create_oval(start_x-3, start_y-3, start_x+3, start_y+3,
-                                              fill='green', outline='white', width=1)
+                # Draw end point
+                if len(canvas_points) >= 4:
+                    end_x, end_y = canvas_points[-2], canvas_points[-1]
+                    self.canvas.create_rectangle(end_x - 3, end_y - 3, end_x + 3, end_y + 3,
+                                                 fill='red', outline='white', width=1)
 
-                    # Draw end point
-                    if len(canvas_points) >= 4:
-                        end_x, end_y = canvas_points[-2], canvas_points[-1]
-                        self.canvas.create_rectangle(end_x-3, end_y-3, end_x+3, end_y+3,
-                                                   fill='red', outline='white', width=1)
-
-                    # Add route label
-                    if len(canvas_points) >= 4:
-                        mid_idx = len(canvas_points) // 4 * 2  # Roughly middle point
-                        mid_x, mid_y = canvas_points[mid_idx], canvas_points[mid_idx + 1]
-                        self.canvas.create_text(mid_x + 5, mid_y - 5, text=f"R{route_idx + 1}",
-                                              fill=color, anchor=tk.W, font=('Arial', 8, 'bold'))
-                else:
-                    self.log(f"Route {route_idx} has insufficient canvas points: {len(canvas_points)}", "debug")
-
-            self.log("Routes drawn successfully", "debug")
-
-        except Exception as e:
-            self.log(f"Error drawing actual routes: {e}", "error")
+                # Add route label
+                if len(canvas_points) >= 4:
+                    mid_idx = len(canvas_points) // 4 * 2  # Roughly middle point
+                    mid_x, mid_y = canvas_points[mid_idx], canvas_points[mid_idx + 1]
+                    self.canvas.create_text(mid_x + 5, mid_y - 5, text=f"R{route_idx + 1}",
+                                            fill=color, anchor=tk.W, font=('Arial', 8, 'bold'))
 
     def draw_camera_bounds(self):
         """Draw camera field of view (legacy)"""
@@ -889,21 +867,17 @@ class MachineAreaWindow:
 
         # Draw camera FOV rectangle
         self.canvas.create_rectangle(x1, y2, x2, y1, outline=self.colors['camera_bounds'], width=2,
-                                   fill=self.colors['camera_bounds'], stipple="gray25")
+                                     fill=self.colors['camera_bounds'], stipple="gray25")
 
     def draw_camera_frame(self):
         """Draw camera frame bounds based on resolution"""
         if not self.camera_frame_bounds:
-            self.log("No camera frame bounds available", "debug")
             return
 
         try:
-            self.log(f"Drawing camera frame: {self.camera_frame_bounds}", "debug")
 
             x1, y1 = self.machine_to_canvas(self.camera_frame_bounds['x_min'], self.camera_frame_bounds['y_min'])
             x2, y2 = self.machine_to_canvas(self.camera_frame_bounds['x_max'], self.camera_frame_bounds['y_max'])
-
-            self.log(f"Canvas coordinates: ({x1},{y1}) to ({x2},{y2})", "debug")
 
             # Draw camera frame rectangle with distinct style
             self.canvas.create_rectangle(x1, y2, x2, y1, outline=self.colors['camera_frame'], width=3, fill="")
@@ -935,19 +909,17 @@ class MachineAreaWindow:
 
             # Create background for text
             self.canvas.create_rectangle(center_x - 40, center_y - 15, center_x + 40, center_y + 15,
-                                       fill=self.colors['background'], outline=self.colors['camera_frame'], width=1)
+                                         fill=self.colors['background'], outline=self.colors['camera_frame'], width=1)
 
             self.canvas.create_text(center_x, center_y, text=frame_info,
-                                  fill=self.colors['camera_frame'], anchor=tk.CENTER, font=('Arial', 8))
+                                    fill=self.colors['camera_frame'], anchor=tk.CENTER, font=('Arial', 8))
 
             # Draw crosshairs at center
             crosshair_size = 5
             self.canvas.create_line(center_x - crosshair_size, center_y, center_x + crosshair_size, center_y,
-                                   fill=self.colors['camera_frame'], width=1)
+                                    fill=self.colors['camera_frame'], width=1)
             self.canvas.create_line(center_x, center_y - crosshair_size, center_x, center_y + crosshair_size,
-                                   fill=self.colors['camera_frame'], width=1)
-
-            self.log("Camera frame drawn successfully", "debug")
+                                    fill=self.colors['camera_frame'], width=1)
 
         except Exception as e:
             self.log(f"Error drawing camera frame: {e}", "error")
@@ -959,11 +931,11 @@ class MachineAreaWindow:
 
             # Draw point
             self.canvas.create_oval(canvas_x - 3, canvas_y - 3, canvas_x + 3, canvas_y + 3,
-                                  fill=self.colors['calibration_points'], outline="white", width=1)
+                                    fill=self.colors['calibration_points'], outline="white", width=1)
 
             # Add point number
             self.canvas.create_text(canvas_x + 8, canvas_y - 8, text=str(i + 1),
-                                  fill=self.colors['calibration_points'], anchor=tk.W)
+                                    fill=self.colors['calibration_points'], anchor=tk.W)
 
     def draw_machine_position(self):
         """Draw current machine position"""
@@ -973,14 +945,14 @@ class MachineAreaWindow:
         # Draw machine position as cross
         size = 6
         self.canvas.create_line(canvas_x - size, canvas_y, canvas_x + size, canvas_y,
-                               fill=self.colors['machine_position'], width=3)
+                                fill=self.colors['machine_position'], width=3)
         self.canvas.create_line(canvas_x, canvas_y - size, canvas_x, canvas_y + size,
-                               fill=self.colors['machine_position'], width=3)
+                                fill=self.colors['machine_position'], width=3)
 
         # Add position label
         self.canvas.create_text(canvas_x + 10, canvas_y - 10,
-                               text=f"M({x:.1f},{y:.1f})",
-                               fill=self.colors['machine_position'], anchor=tk.W)
+                                text=f"M({x:.1f},{y:.1f})",
+                                fill=self.colors['machine_position'], anchor=tk.W)
 
     def draw_camera_position(self):
         """Draw current camera position"""
@@ -990,13 +962,13 @@ class MachineAreaWindow:
         # Draw camera position as circle
         radius = 5
         self.canvas.create_oval(canvas_x - radius, canvas_y - radius,
-                               canvas_x + radius, canvas_y + radius,
-                               fill=self.colors['camera_position'], outline="white", width=2)
+                                canvas_x + radius, canvas_y + radius,
+                                fill=self.colors['camera_position'], outline="white", width=2)
 
         # Add position label
         self.canvas.create_text(canvas_x + 10, canvas_y + 10,
-                               text=f"C({x:.1f},{y:.1f})",
-                               fill=self.colors['camera_position'], anchor=tk.W)
+                                text=f"C({x:.1f},{y:.1f})",
+                                fill=self.colors['camera_position'], anchor=tk.W)
 
     def update_status_display(self):
         """Update status text display"""
@@ -1028,7 +1000,8 @@ class MachineAreaWindow:
             if self.camera_frame_bounds:
                 frame_w = self.camera_frame_bounds['width_mm']
                 frame_h = self.camera_frame_bounds['height_mm']
-                status_lines.append(f"Frame: {self.camera_resolution[0]}x{self.camera_resolution[1]} ({frame_w:.1f}x{frame_h:.1f}mm)")
+                status_lines.append(
+                    f"Frame: {self.camera_resolution[0]}x{self.camera_resolution[1]} ({frame_w:.1f}x{frame_h:.1f}mm)")
             else:
                 status_lines.append("Frame: Not calculated")
 
@@ -1211,7 +1184,7 @@ def add_machine_area_window_to_main(main_window_class):
         def extended_on_closing(self):
             self.cleanup_extension()
             self._original_on_closing()
+
         main_window_class.on_closing = extended_on_closing
     else:
         main_window_class.on_closing = cleanup_extension
-
