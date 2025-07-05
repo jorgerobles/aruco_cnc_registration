@@ -6,12 +6,14 @@ FIXED: Simplified jogging and better position tracking
 """
 
 import time
+from abc import ABC
 from concurrent.futures import Future
 from typing import List, Optional, Dict, Any
 
 import serial
 
 from services.event_broker import event_aware, event_handler, EventPriority
+from services.grbl_interfaces import IGRBLStatus, IGRBLConnection, IGRBLMovement, IGRBLCommunication
 
 
 class GRBLEvents:
@@ -38,13 +40,13 @@ class GRBLEvents:
     DEBUG_INFO = "grbl.debug_info"
 
 @event_aware()
-class GRBLController:
+class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunication):
     """Simple, clean GRBL Controller - same API, simpler implementation"""
 
     def __init__(self):
         # Connection state
         self.serial_connection = None
-        self.is_connected = False
+        self._is_connected = False
         self.current_position = [0.0, 0.0, 0.0]  # X, Y, Z
         self.current_status = "Unknown"
 
@@ -77,7 +79,7 @@ class GRBLController:
 
             # Test communication
             if self._test_communication():
-                self.is_connected = True
+                self._is_connected = True
                 self._grbl_detected = True
                 self._initialization_complete = True
 
@@ -109,7 +111,7 @@ class GRBLController:
         """Immediate disconnect - no threads to wait for"""
         self._log("Disconnecting...")
 
-        was_connected = self.is_connected
+        was_connected = self._is_connected
 
         # Cancel any active futures
         for future in list(self._active_futures.values()):
@@ -129,7 +131,7 @@ class GRBLController:
             self.serial_connection = None
 
         # Reset state
-        self.is_connected = False
+        self._is_connected = False
         self._grbl_detected = False
         self._initialization_complete = False
         self.current_position = [0.0, 0.0, 0.0]
@@ -141,7 +143,7 @@ class GRBLController:
 
     def send_command(self, command: str, custom_timeout: Optional[float] = None) -> List[str]:
         """Send command synchronously and wait for response"""
-        if not self.is_connected:
+        if not self._is_connected:
             raise Exception("GRBL not connected")
 
         timeout = custom_timeout or 5.0
@@ -149,7 +151,7 @@ class GRBLController:
 
     def send_command_async(self, command: str, custom_timeout: Optional[float] = None) -> Future:
         """Send command asynchronously"""
-        if not self.is_connected:
+        if not self._is_connected:
             raise Exception("GRBL not connected")
 
         timeout = custom_timeout or 5.0
@@ -177,7 +179,7 @@ class GRBLController:
 
     def send_realtime_command(self, command: str) -> None:
         """Send real-time command (emergency commands)"""
-        if not self.is_connected:
+        if not self._is_connected:
             raise Exception("GRBL not connected")
 
         if command in ['!', '~', '\x18']:
@@ -380,7 +382,7 @@ class GRBLController:
     def get_connection_info(self) -> dict:
         """Get connection information"""
         return {
-            'is_connected': self.is_connected,
+            'is_connected': self._is_connected,
             'grbl_detected': self._grbl_detected,
             'initialization_complete': self._initialization_complete,
             'current_status': self.current_status,
@@ -393,7 +395,7 @@ class GRBLController:
 
     def is_properly_disconnected(self) -> bool:
         """Check if properly disconnected"""
-        return (not self.is_connected and
+        return (not self._is_connected and
                 not self._grbl_detected and
                 not self._initialization_complete and
                 self.serial_connection is None and
@@ -402,7 +404,7 @@ class GRBLController:
     def get_disconnect_status(self) -> Dict[str, Any]:
         """Get disconnect status"""
         return {
-            'is_connected': self.is_connected,
+            'is_connected': self._is_connected,
             'grbl_detected': self._grbl_detected,
             'initialization_complete': self._initialization_complete,
             'serial_connection_exists': self.serial_connection is not None,
@@ -626,3 +628,6 @@ class GRBLController:
     def _on_error(self, error_message: str):
         """Handle error events"""
         pass
+
+    def is_connected(self) -> bool:
+        return self._is_connected

@@ -3,13 +3,14 @@ Compact Connection Panel focused only on GRBL connections
 Fixed to avoid duplicate logging - GRBL controller handles its own logging
 """
 
-import tkinter as tk
-from tkinter import ttk, messagebox
-import serial
-import serial.tools.list_ports
 import threading
 import time
+import tkinter as tk
+from tkinter import ttk, messagebox
 from typing import Callable, Optional
+
+import serial
+import serial.tools.list_ports
 
 from services.event_broker import (event_aware, event_handler, EventPriority)
 from services.grbl_controller import GRBLEvents
@@ -97,19 +98,13 @@ class MachinePanel:
         baud_frame = ttk.Frame(grbl_frame)
         baud_frame.pack(fill=tk.X, pady=2)
 
-
-
         # Status and controls
         status_frame = ttk.Frame(grbl_frame)
         status_frame.pack(fill=tk.X, pady=2)
 
-
-
-
         # Connect/disconnect buttons
         button_frame = ttk.Frame(grbl_frame)
         button_frame.pack(fill=tk.X, pady=2)
-
 
         self.grbl_connect_btn = ttk.Button(button_frame, text="Connect GRBL", command=self.connect_grbl)
         self.grbl_connect_btn.pack(side=tk.LEFT, padx=(0, 5))

@@ -7,6 +7,8 @@ Eliminates duplicate logging and improper use of ERROR events for success messag
 import numpy as np
 from typing import List, Tuple, Optional
 from services.event_broker import event_aware
+from services.regitration_interfaces import IRegistrationComputation, IRegistrationDataManager, IRegistrationPersistence
+
 
 class RegistrationEvents:
     POINT_ADDED = "registration.point_added"
@@ -26,7 +28,7 @@ class RegistrationEvents:
 
 
 @event_aware()
-class RegistrationManager:
+class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IRegistrationPersistence):
     """Manages camera-to-machine coordinate registration with clean event notifications"""
 
     def __init__(self):

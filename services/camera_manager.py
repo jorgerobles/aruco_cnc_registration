@@ -6,6 +6,8 @@ Marker detection moved to MarkerDetectionOverlay
 import cv2
 import numpy as np
 import platform
+
+from services.camera_interfaces import ICameraConnection, ICameraCalibration, ICameraCapture
 from services.event_broker import event_aware
 
 
@@ -32,7 +34,7 @@ class CameraEvents:
 
 
 @event_aware()
-class CameraManager:
+class CameraManager(ICameraConnection, ICameraCalibration, ICameraCapture):
     def __init__(self, camera_id=0, resolution=(640,480,)):
         self.camera_id = camera_id
         self.cap = None
@@ -200,3 +202,11 @@ class CameraManager:
             error_msg = f"Failed to save calibration: {e}"
             self.emit(CameraEvents.ERROR, error_msg)
             return False
+
+
+    def camera_matrix(self, value):
+        self._camera_matrix = value
+
+
+    def dist_coeffs(self, value):
+        self._dist_coeffs = value
