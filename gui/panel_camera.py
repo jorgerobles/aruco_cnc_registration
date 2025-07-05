@@ -8,9 +8,10 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import Callable, Optional
 
+from services.camera_manager import CameraEvents
 # Import event system
 from services.event_broker import event_aware, event_handler, EventPriority
-from services.events import CameraEvents
+
 
 
 @event_aware()

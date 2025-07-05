@@ -12,7 +12,7 @@ from tkinter import ttk, messagebox
 from typing import Callable, Optional
 
 from services.event_broker import (event_aware, event_handler, EventPriority)
-from services.events import GRBLEvents
+from services.grbl_controller import GRBLEvents
 
 
 @event_aware()

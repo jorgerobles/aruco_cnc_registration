@@ -7,7 +7,22 @@ Eliminates duplicate logging and improper use of ERROR events for success messag
 import numpy as np
 from typing import List, Tuple, Optional
 from services.event_broker import event_aware
-from services.events import RegistrationEvents
+
+class RegistrationEvents:
+    POINT_ADDED = "registration.point_added"
+    POINT_REMOVED = "registration.point_removed"
+    POINT_TRANSFORMED = "registration.point_transformed"
+    BATCH_TRANSFORMED = "registration.batch_transformed"
+    COMPUTED = "registration.computed"
+    AUTO_COMPUTED = "registration.auto_computed"
+    CLEARED = "registration.cleared"
+    RESET = "registration.reset"
+    SAVED = "registration.saved"
+    LOADED = "registration.loaded"
+    VALIDATION_PASSED = "registration.validation_passed"
+    VALIDATION_FAILED = "registration.validation_failed"
+    ERROR = "registration.error"
+    DEBUG_INFO = "registration.debug_info"  # New event for debug information
 
 
 @event_aware()

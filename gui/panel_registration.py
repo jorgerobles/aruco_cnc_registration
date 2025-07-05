@@ -2,8 +2,10 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Callable, Optional
 
+from services.camera_manager import CameraEvents
 from services.event_broker import (event_aware, event_handler, EventPriority)
-from services.events import (CameraEvents, RegistrationEvents)
+from services.registration_manager import RegistrationEvents
+
 
 @event_aware()
 class RegistrationPanel:

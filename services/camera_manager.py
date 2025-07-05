@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import platform
 from services.event_broker import event_aware
-from services.events import CameraEvents
+
 
 def get_optimal_camera_backend():
     """Get the optimal camera backend for current platform"""
@@ -21,6 +21,14 @@ def get_optimal_camera_backend():
         return cv2.CAP_AVFOUNDATION
     else:
         return cv2.CAP_ANY
+
+# Predefined event types - Updated to include DEBUG_INFO
+class CameraEvents:
+    CONNECTED = "camera.connected"
+    DISCONNECTED = "camera.disconnected"
+    FRAME_CAPTURED = "camera.frame_captured"
+    ERROR = "camera.error"
+    CALIBRATION_LOADED = "camera.calibration_loaded"
 
 
 @event_aware()

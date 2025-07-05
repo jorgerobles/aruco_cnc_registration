@@ -4,8 +4,8 @@ Defines the contract for frame overlay components
 """
 
 from abc import ABC, abstractmethod
+
 import numpy as np
-from typing import Optional, List, Tuple
 
 
 class FrameOverlay(ABC):

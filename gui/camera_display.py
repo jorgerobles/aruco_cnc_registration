@@ -6,13 +6,15 @@ Using @event_aware decorator for clean event handling
 """
 
 import tkinter as tk
+from typing import Optional, Callable, List, Dict
+
 import cv2
 import numpy as np
 from PIL import Image, ImageTk
-from typing import Optional, Callable, List, Tuple, Dict, Type
 
+from services.camera_manager import CameraEvents
 from services.event_broker import (event_aware, event_handler, EventPriority)
-from services.events import CameraEvents
+
 from services.overlays.overlay_interface import FrameOverlay
 
 

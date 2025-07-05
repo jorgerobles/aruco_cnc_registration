@@ -3,9 +3,11 @@ Marker Detection Overlay
 Handles ArUco marker detection and pose estimation as an overlay component
 """
 
+from typing import Optional, Callable, Tuple
+
 import cv2
 import numpy as np
-from typing import Optional, Callable, Tuple, List
+
 from services.overlays.overlay_interface import FrameOverlay
 
 

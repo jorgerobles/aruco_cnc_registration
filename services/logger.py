@@ -6,8 +6,8 @@ Provides flexible logging with multiple backends and automatic method call track
 import functools
 import inspect
 import time
-from typing import Callable, Optional, Any, Dict, List
 from enum import Enum
+from typing import Callable, Optional, Dict, List
 
 
 class LogLevel(Enum):

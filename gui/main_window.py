@@ -6,27 +6,28 @@ Clean separation of responsibilities between components
 
 import time
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk
 from typing import List
+
 import numpy as np
 
-from gui.panel_commands import GRBLCommandPanel
-from gui.window_machine_area import EnhancedMachineAreaWindow
-from gui.panel_machine import MachinePanel
+from gui.camera_display import CameraDisplay
 from gui.panel_camera import CameraPanel
+from gui.panel_commands import GRBLCommandPanel
+from gui.panel_debug import DebugPanel
 from gui.panel_jogger import JogPanel
+from gui.panel_machine import MachinePanel
+from gui.panel_machine_area import MachineAreaPanel
 from gui.panel_registration import RegistrationPanel
 from gui.panel_svg import SVGRoutesPanel
-from gui.panel_debug import DebugPanel
-from gui.camera_display import CameraDisplay
-from services.camera_manager import CameraManager
+from gui.window_machine_area import MachineAreaWindow
+from services.camera_manager import CameraManager, CameraEvents
 from services.event_broker import (event_aware, event_handler, EventBroker, EventPriority)
-from services.events import ( CameraEvents, GRBLEvents, RegistrationEvents, ApplicationEvents)
-from services.grbl_controller import GRBLController
+from services.events import ApplicationEvents
+from services.grbl_controller import GRBLController, GRBLEvents
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
 from services.overlays.svg_routes_overlay import SVGRoutesOverlay
-from services.registration_manager import RegistrationManager
-from gui.panel_machine_area import MachineAreaPanel
+from services.registration_manager import RegistrationManager, RegistrationEvents
 
 
 @event_aware()
@@ -54,7 +55,6 @@ class RegistrationGUI:
         # Machine area window (will be initialized later)
         self.machine_area_window = None
         self.machine_area_toggle_button = None
-
 
         # Set up event broker logging (using the decorator's broker)
         self.setup_event_logging()
@@ -331,7 +331,6 @@ class RegistrationGUI:
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-
         self.connection_panel = MachinePanel(scrollable_frame, self.grbl_controller)
 
         # CameraPanel handles all camera functionality
@@ -387,7 +386,7 @@ class RegistrationGUI:
         """Setup machine area visualization window"""
         try:
             # Create machine area window
-            self.machine_area_window = EnhancedMachineAreaWindow(
+            self.machine_area_window = MachineAreaWindow(
                 self.root,
                 self.grbl_controller,
                 self.registration_manager,
@@ -405,8 +404,6 @@ class RegistrationGUI:
             self.log(f"Error setting up machine area window: {e}", "error")
             # Continue without machine area window - don't let this break the app
             self.machine_area_window = None
-
-
 
     def create_machine_area_control_window(self):
         """Create separate control window for machine area if debug panel integration fails"""
@@ -426,7 +423,7 @@ class RegistrationGUI:
 
             # Title
             title_label = tk.Label(main_frame, text="🗺️ Machine Area Visualization",
-                                 font=('Arial', 10, 'bold'))
+                                   font=('Arial', 10, 'bold'))
             title_label.pack(pady=(0, 5))
 
             # Button frame
@@ -478,6 +475,7 @@ class RegistrationGUI:
 
     def setup_machine_area_shortcuts(self):
         """Setup keyboard shortcuts"""
+
         def on_key_press(event):
             if event.keysym == 'F10':
                 self.toggle_machine_area_window()
@@ -540,7 +538,8 @@ class RegistrationGUI:
             self.log(f"Captured calibration point {point_count}")
 
             # Update machine area window
-            if hasattr(self, 'machine_area_window') and self.machine_area_window and self.machine_area_window.is_visible:
+            if hasattr(self,
+                       'machine_area_window') and self.machine_area_window and self.machine_area_window.is_visible:
                 self.machine_area_window.update_calibration_points()
                 self.machine_area_window.schedule_update()
 
@@ -568,7 +567,8 @@ class RegistrationGUI:
                 f"Position test - Camera: {tvec.flatten()}, Predicted machine: X{machine_point[0]:.3f} Y{machine_point[1]:.3f} Z{machine_point[2]:.3f}")
 
             # Update machine area window with camera position
-            if hasattr(self, 'machine_area_window') and self.machine_area_window and self.machine_area_window.is_visible:
+            if hasattr(self,
+                       'machine_area_window') and self.machine_area_window and self.machine_area_window.is_visible:
                 self.machine_area_window.current_camera_position = (machine_point[0], machine_point[1])
                 self.machine_area_window.update_camera_bounds()
                 self.machine_area_window.schedule_update()
@@ -614,7 +614,6 @@ class RegistrationGUI:
 
             self.camera_display.start_feed()
 
-
     def stop_camera_feed(self):
         """Stop camera feed"""
         if self.camera_display:
@@ -629,7 +628,8 @@ class RegistrationGUI:
                 self.log(f"SVG routes loaded: {svg_file_path}")
 
                 # Update machine area window
-                if hasattr(self, 'machine_area_window') and self.machine_area_window and self.machine_area_window.is_visible:
+                if hasattr(self,
+                           'machine_area_window') and self.machine_area_window and self.machine_area_window.is_visible:
                     self.machine_area_window.update_all_data()
                     self.machine_area_window.schedule_update()
                     self.log("Machine area window updated with new routes")
@@ -656,7 +656,8 @@ class RegistrationGUI:
                     self.machine_area_window.update_camera_bounds()
                     self.machine_area_window.schedule_update()
 
-                    self.log(f"Camera position synced to machine area: ({machine_point[0]:.1f}, {machine_point[1]:.1f})")
+                    self.log(
+                        f"Camera position synced to machine area: ({machine_point[0]:.1f}, {machine_point[1]:.1f})")
 
         except Exception as e:
             self.log(f"Error syncing camera position: {e}", "error")
@@ -779,7 +780,8 @@ class RegistrationGUI:
 
             # Get camera status
             if self.camera_display:
-                status['camera']['feed_active'] = hasattr(self.camera_display, '_feed_running') and self.camera_display._feed_running
+                status['camera']['feed_active'] = hasattr(self.camera_display,
+                                                          '_feed_running') and self.camera_display._feed_running
 
             # Get registration status
             if self.registration_manager:
@@ -896,7 +898,6 @@ class RegistrationGUI:
             self.command_panel.cleanup_subscriptions()
             self.log("Command panel cleaned up")
 
-
         if hasattr(self, 'machine_area_panel') and self.machine_area_panel:
             self.machine_area_panel.cleanup_subscriptions()
             self.log("Machine area panel cleaned up")
@@ -914,7 +915,6 @@ class RegistrationGUI:
         self.grbl_controller.disconnect()
 
         self.root.destroy()
-
 
 
 def main():

@@ -12,8 +12,30 @@ from typing import List, Optional, Dict, Any
 import serial
 
 from services.event_broker import event_aware, event_handler, EventPriority
-from services.events import GRBLEvents
 
+
+class GRBLEvents:
+    """GRBL event type constants"""
+
+    # Connection events
+    CONNECTED = "grbl.connected"
+    DISCONNECTED = "grbl.disconnected"
+
+    # Command events
+    COMMAND_SENT = "grbl.command_sent"
+
+    # Response events
+    RESPONSE_RECEIVED = "grbl.response_received"
+
+    # Status events
+    STATUS_CHANGED = "grbl.status_changed"
+    POSITION_CHANGED = "grbl.position_changed"
+
+    # Error events
+    ERROR = "grbl.error"
+
+    # Debug events
+    DEBUG_INFO = "grbl.debug_info"
 
 @event_aware()
 class GRBLController:
@@ -593,7 +615,7 @@ class GRBLController:
     def _log(self, message: str):
         """Internal logging"""
         if self._debug_enabled:
-            self.emit("grbl.debug_info", message)
+            self.emit(GRBLEvents.DEBUG_INFO, message)
 
     @event_handler(GRBLEvents.CONNECTED, EventPriority.HIGH)
     def _on_connected(self, success: bool):
