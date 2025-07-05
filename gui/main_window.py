@@ -21,20 +21,19 @@ from gui.panel_machine_area import MachineAreaPanel
 from gui.panel_registration import RegistrationPanel
 from gui.panel_svg import SVGRoutesPanel
 from gui.window_machine_area import MachineAreaWindow
-from services.camera_manager import CameraManager, CameraEvents
+from services.camera_manager import CameraEvents
 from services.event_broker import (event_aware, event_handler, EventBroker, EventPriority)
 from services.events import ApplicationEvents
-from services.grbl_controller import GRBLController, GRBLEvents
+from services.grbl_controller import GRBLEvents
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
-from services.registration_manager import RegistrationManager, RegistrationEvents
-from services.routes_manager import RouteManager
+from services.registration_manager import RegistrationEvents
 
 
 @event_aware()
 class RegistrationGUI:
     """Main GUI window for GRBL Camera Registration application with Machine Area Visualization"""
 
-    def __init__(self, root, grbl_controller, camera_manager, registration_manager, route_manager):
+    def __init__(self, root, grbl_controller, camera_manager, registration_manager, route_manager, hardware_service):
         self.root = root
         self.root.title("GRBL Camera Registration with Machine Area Visualization")
         self.root.geometry("1600x900")
@@ -64,6 +63,7 @@ class RegistrationGUI:
         self.camera_manager = camera_manager
         self.registration_manager = registration_manager
         self.route_manager = route_manager
+        self.hardware_service = hardware_service
 
         self.setup_gui()
 
@@ -335,7 +335,7 @@ class RegistrationGUI:
         self.connection_panel = MachinePanel(scrollable_frame, self.grbl_controller)
 
         # CameraPanel handles all camera functionality
-        self.calibration_panel = CameraPanel(scrollable_frame, self.camera_manager)
+        self.calibration_panel = CameraPanel(scrollable_frame, self.camera_manager, self.hardware_service)
 
         self.machine_panel = JogPanel(scrollable_frame, self.grbl_controller)
 
@@ -392,6 +392,7 @@ class RegistrationGUI:
                 self.grbl_controller,
                 self.registration_manager,
                 self.route_manager,
+                self.hardware_service,
                 self.camera_manager,
                 self.log
             )

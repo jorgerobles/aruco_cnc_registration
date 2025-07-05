@@ -12,8 +12,9 @@ from typing import Optional, Tuple, List, Callable
 import numpy as np
 
 from services.camera_manager import CameraEvents
-from services.event_broker import event_aware, event_handler
+from services.event_broker import event_aware, event_handler, EventPriority
 from services.grbl_controller import GRBLEvents
+from services.hardware_service import HardwareEvents
 from services.registration_manager import RegistrationEvents
 
 
@@ -21,13 +22,15 @@ from services.registration_manager import RegistrationEvents
 class MachineAreaWindow:
     """Floating window displaying machine area, routes, camera position and frame bounds"""
 
-    def __init__(self, parent_window, grbl_controller, registration_manager, routes_service, camera_manager=None,
+    def __init__(self, parent_window, grbl_controller, registration_manager, routes_service, hardware_service,
+                 camera_manager,
                  logger: Optional[Callable] = None):
         self.parent_window = parent_window
         self.grbl_controller = grbl_controller
         self.registration_manager = registration_manager
         self.routes_service = routes_service
         self.camera_manager = camera_manager  # Add camera manager
+        self.hardware_service = hardware_service
         self.logger = logger
 
         # Window state
@@ -39,11 +42,15 @@ class MachineAreaWindow:
         self.update_thread = None
         self.update_running = False
 
+        self.camera_offset = self.hardware_service.get_camera_offset().values()
+
+        machine_size = self.hardware_service.get_machine_size()
+
         # Machine configuration (default values, should be configurable)
         self.machine_bounds = {
-            'x_min': 0.0, 'x_max': 200.0,  # 200mm X travel
-            'y_min': 0.0, 'y_max': 200.0,  # 200mm Y travel
-            'z_min': 0.0, 'z_max': 50.0  # 50mm Z travel (for reference)
+            'x_min': 0.0, 'x_max': machine_size['x'],  # 200mm X travel
+            'y_min': 0.0, 'y_max': machine_size['y'],  # 200mm Y travel
+            'z_min': 0.0, 'z_max': machine_size['z']  # 50mm Z travel (for reference)
         }
 
         # Display configuration
@@ -544,8 +551,40 @@ class MachineAreaWindow:
         if self.window is not None:
             self.window.after_idle(self.update_display)
 
+    def get_camera_position(self):
+        """Get camera position with offset applied"""
+        try:
+            # Get camera offset from hardware service
+            camera_offset = self.hardware_service.get_camera_offset()
+
+            # Ensure we have a valid machine position
+            if self.current_machine_position is None:
+                self.log("No current machine position available", "debug")
+                return None
+
+            # Extract values from the offset dictionary
+            offset_x = camera_offset.get('x', 0.0)
+            offset_y = camera_offset.get('y', 0.0)
+
+            # Get machine position components
+            machine_x, machine_y, machine_z = self.current_machine_position[:3]
+
+            # Calculate camera position with offset
+            camera_x = machine_x + offset_x
+            camera_y = machine_y + offset_y
+
+            camera_position = np.array([camera_x, camera_y])
+
+            self.log(f"Camera position calculated: Machine({machine_x:.2f}, {machine_y:.2f}) + Offset({offset_x:.2f}, {offset_y:.2f}) = Camera({camera_x:.2f}, {camera_y:.2f})", "debug")
+
+            return camera_position
+
+        except Exception as e:
+            self.log(f"Error calculating camera position: {e}", "error")
+            return None
+
     def update_all_data(self):
-        """Update all data from controllers and managers"""
+        """Update all data from controllers and managers - FIXED camera position handling"""
         try:
             # Update machine position with error handling and rate limiting
             if self.grbl_controller and self.grbl_controller.is_connected:
@@ -565,54 +604,27 @@ class MachineAreaWindow:
                         self.log(f"GRBL communication error in machine area window: {e}", "warning")
                         self._last_grbl_error_time = current_time
 
+            # Update camera position using the fixed method
+            try:
+                camera_position = self.get_camera_position()
+                if camera_position is not None:
+                    # Convert numpy array to list for consistent handling
+                    self.current_camera_position = [float(camera_position[0]), float(camera_position[1])]
+                    self.log(f"Camera position updated: {self.current_camera_position}", "debug")
 
-            # Update camera position from routes service OR camera manager
-            camera_position_updated = False
+                    # Calculate camera field of view bounds (legacy)
+                    self.update_camera_bounds()
 
-            # Try to get camera position from routes service first
-            if self.routes_service:
-                try:
-                    camera_position = self.routes_service.get_camera_position()
-                    if camera_position:
-                        self.current_camera_position = camera_position
-                        camera_position_updated = True
-                        self.log(f"Camera position updated from routes service: {self.current_camera_position}",
-                                 "debug")
+                    # Calculate camera frame bounds (new)
+                    self.update_camera_frame_bounds()
+                else:
+                    self.current_camera_position = None
+                    self.camera_view_bounds = None
+                    self.camera_frame_bounds = None
+                    self.log("No camera position available", "debug")
 
-                        # Calculate camera field of view bounds (legacy)
-                        self.update_camera_bounds()
-
-                        # Calculate camera frame bounds (new)
-                        self.update_camera_frame_bounds()
-                    else:
-                        self.log("No camera position in routes service", "debug")
-
-                except Exception as e:
-                    self.log(f"Error getting camera position from routes service: {e}", "debug")
-
-            # If no camera position from routes service, try to get it from camera manager
-            if not camera_position_updated and self.camera_manager and self.camera_manager.is_connected:
-                try:
-                    # If we have a camera but no position from routes service,
-                    # we could use the current machine position as camera position
-                    # This assumes the camera moves with the machine
-                    if hasattr(self, 'current_machine_position'):
-                        self.current_camera_position = [
-                            self.current_machine_position[0],
-                            self.current_machine_position[1]
-                        ]
-                        camera_position_updated = True
-                        self.log(f"Using machine position as camera position: {self.current_camera_position}", "debug")
-
-                        # Calculate camera bounds
-                        self.update_camera_bounds()
-                        self.update_camera_frame_bounds()
-
-                except Exception as e:
-                    self.log(f"Error getting camera position from camera manager: {e}", "debug")
-
-            # If still no camera position, clear camera bounds
-            if not camera_position_updated:
+            except Exception as e:
+                self.log(f"Error updating camera position: {e}", "error")
                 self.current_camera_position = None
                 self.camera_view_bounds = None
                 self.camera_frame_bounds = None
@@ -629,6 +641,7 @@ class MachineAreaWindow:
                 except Exception as e:
                     self.routes_bounds = None
                     self.actual_routes = []
+                    self.log(f"Error updating routes data: {e}", "debug")
             else:
                 self.routes_bounds = None
                 self.actual_routes = []
@@ -641,7 +654,7 @@ class MachineAreaWindow:
 
     def update_camera_bounds(self):
         """Update camera field of view bounds (legacy method)"""
-        if not self.current_camera_position:
+        if self.current_camera_position is None or len(self.current_camera_position) < 2:
             self.camera_view_bounds = None
             return
 
@@ -651,7 +664,7 @@ class MachineAreaWindow:
             camera_fov_width = 50.0  # mm (adjust based on your camera/lens)
             camera_fov_height = 40.0  # mm (adjust based on your camera/lens)
 
-            cam_x, cam_y = self.current_camera_position
+            cam_x, cam_y = float(self.current_camera_position[0]), float(self.current_camera_position[1])
 
             self.camera_view_bounds = {
                 'x_min': cam_x - camera_fov_width / 2,
@@ -666,7 +679,7 @@ class MachineAreaWindow:
 
     def update_camera_frame_bounds(self):
         """Update camera frame bounds based on resolution and scale"""
-        if not self.current_camera_position:
+        if self.current_camera_position is None or len(self.current_camera_position) < 2:
             self.camera_frame_bounds = None
             return
 
@@ -675,7 +688,7 @@ class MachineAreaWindow:
             frame_width_mm = self.camera_resolution[0] / self.pixels_per_mm
             frame_height_mm = self.camera_resolution[1] / self.pixels_per_mm
 
-            cam_x, cam_y = self.current_camera_position
+            cam_x, cam_y = float(self.current_camera_position[0]), float(self.current_camera_position[1])
 
             # Camera frame centered on camera position
             self.camera_frame_bounds = {
@@ -1117,74 +1130,32 @@ class MachineAreaWindow:
             self.window.destroy()
         self.log("Machine area visualization with camera frame cleaned up")
 
+    def get_camera_position_legacy(self):
+        """Legacy method - replaced with the fixed version above"""
+        try:
+            # Get camera offset from hardware service
+            camera_offset = self.hardware_service.get_camera_offset()
 
-# Integration helper function for main window
-def add_machine_area_window_to_main(main_window_class):
-    """
-    Helper function to add machine area window functionality to main window
-    Call this to extend your existing main window with the machine area visualization
-    """
+            # Log the values for debugging
+            self.log(f"Machine position: {self.current_machine_position.tolist()}", 'DEBUG')
+            self.log(f"Camera offset: {camera_offset}", 'DEBUG')
 
-    def __init_extension__(self, *args, **kwargs):
-        # Call original init
-        self._original_init(*args, **kwargs)
+            # Ensure we have a valid machine position
+            if self.current_machine_position is None:
+                return None
 
-        # Add machine area window with camera manager if available
-        camera_manager = getattr(self, 'camera_manager', None)
+            # Extract machine position
+            x0, y0, z0 = float(self.current_machine_position[0]), float(self.current_machine_position[1]), float(self.current_machine_position[2])
 
-        self.machine_area_window = MachineAreaWindow(
-            self.root,
-            self.grbl_controller,
-            self.registration_manager,
-            self.routes_service,  # Changed from routes_service to routes_service
-            camera_manager,  # Pass camera manager
-            self.log
-        )
+            # Extract camera offset
+            x1, y1, z1 = float(camera_offset['x']), float(camera_offset['y']), float(camera_offset['z'])
 
-        # Add menu item or button to show machine area window
-        self.add_machine_area_controls()
+            # Calculate camera position
+            camera_x = x0 + x1
+            camera_y = y0 + y1
 
-    def add_machine_area_controls(self):
-        """Add controls to show/hide machine area window"""
-        # Add to debug panel or create a button in main window
-        if hasattr(self, 'debug_panel') and self.debug_panel:
-            # Add button to debug panel
-            machine_area_button = tk.Button(
-                self.debug_panel.frame,
-                text="Show Machine Area",
-                command=self.toggle_machine_area_window
-            )
-            machine_area_button.pack(fill=tk.X, pady=2)
+            return np.array([camera_x, camera_y])
 
-    def toggle_machine_area_window(self):
-        """Toggle machine area window visibility"""
-        if self.machine_area_window.is_visible:
-            self.machine_area_window.hide_window()
-        else:
-            self.machine_area_window.show_window()
-
-    def cleanup_extension(self):
-        """Clean up machine area window"""
-        if hasattr(self, 'machine_area_window'):
-            self.machine_area_window.cleanup()
-
-    # Store original methods
-    main_window_class._original_init = main_window_class.__init__
-    if hasattr(main_window_class, 'on_closing'):
-        main_window_class._original_on_closing = main_window_class.on_closing
-
-    # Replace methods
-    main_window_class.__init__ = __init_extension__
-    main_window_class.add_machine_area_controls = add_machine_area_controls
-    main_window_class.toggle_machine_area_window = toggle_machine_area_window
-    main_window_class.cleanup_extension = cleanup_extension
-
-    # Extend on_closing if it exists
-    if hasattr(main_window_class, 'on_closing'):
-        def extended_on_closing(self):
-            self.cleanup_extension()
-            self._original_on_closing()
-
-        main_window_class.on_closing = extended_on_closing
-    else:
-        main_window_class.on_closing = cleanup_extension
+        except Exception as e:
+            self.log(f"Error in legacy camera position calculation: {e}", "error")
+            return None
