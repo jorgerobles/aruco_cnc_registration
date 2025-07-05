@@ -4,8 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Callable, Optional
 
-from services.event_broker import (event_aware, event_handler, EventPriority)
-from services.registration_manager import RegistrationEvents
+from services.event_broker import (event_aware, event_handler)
 from services.routes_manager import RouteEvents
 
 
@@ -13,9 +12,8 @@ from services.routes_manager import RouteEvents
 class SVGRoutesPanel:
     """SVG Routes panel that works with RoutesService"""
 
-    def __init__(self, parent, routes_service, grbl_controller=None, logger: Optional[Callable] = None):
+    def __init__(self, parent, routes_service, logger: Optional[Callable] = None):
         self.routes_service = routes_service  # Changed from routes_overlay to routes_service
-        self.grbl_controller = grbl_controller
         self.logger = logger
 
         # Create frame
@@ -25,7 +23,6 @@ class SVGRoutesPanel:
         # State tracking
         self.routes_loaded = False
         self.camera_connected = False
-        self.registration_available = False
 
         self._setup_widgets()
 
@@ -33,19 +30,6 @@ class SVGRoutesPanel:
         """Log message if logger is available"""
         if self.logger:
             self.logger(message, level)
-
-    @event_handler(RegistrationEvents.COMPUTED, EventPriority.HIGH)
-    def _on_registration_computed(self, computation_data: dict):
-        """Handle registration computation events"""
-        self.registration_available = True
-        error = computation_data.get('error', 0.0)
-        self.log(f"Registration computed - SVG routes can be transformed (error: {error:.4f})")
-
-    @event_handler(RegistrationEvents.CLEARED)
-    def _on_registration_cleared(self):
-        """Handle registration cleared events"""
-        self.registration_available = False
-        self.log("Registration cleared")
 
     # Listen to routes service events
     @event_handler(RouteEvents.ROUTES_LOADED)
@@ -80,13 +64,6 @@ class SVGRoutesPanel:
                                         foreground="gray")
         self.svg_info_label.pack(pady=2)
 
-        # Export options
-        export_frame = ttk.Frame(self.frame)
-        export_frame.pack(fill=tk.X, pady=2)
-
-        ttk.Button(export_frame, text="Export G-code",
-                   command=self.export_gcode).pack(side=tk.LEFT, padx=2)
-
     def load_svg_routes(self):
         """Load SVG routes file"""
         filename = filedialog.askopenfilename(
@@ -117,77 +94,6 @@ class SVGRoutesPanel:
         self.routes_loaded = False
         self.update_svg_info()
         self.log("SVG routes cleared")
-
-    def export_gcode(self):
-        """Export routes to G-code"""
-        if not self.routes_loaded or not self.routes_service.is_loaded():
-            messagebox.showwarning("Warning", "No routes loaded to export")
-            return
-
-        filename = filedialog.asksaveasfilename(
-            title="Export G-code",
-            defaultextension=".gcode",
-            filetypes=[("G-code files", "*.gcode"), ("Text files", "*.txt"), ("All files", "*.*")]
-        )
-
-        if filename:
-            try:
-                # Get feed rate from user (simple dialog)
-                feed_rate = self._get_feed_rate()
-                if feed_rate is None:
-                    return
-
-                success = self.routes_service.export_routes_to_gcode(filename, feed_rate)
-
-                if success:
-                    messagebox.showinfo("Success", f"G-code exported to: {filename}")
-                    self.log(f"G-code exported to: {filename}")
-                else:
-                    messagebox.showerror("Error", "Failed to export G-code")
-
-            except Exception as e:
-                self.log(f"Failed to export G-code: {e}", "error")
-                messagebox.showerror("Error", f"Failed to export G-code: {e}")
-
-    def _get_feed_rate(self) -> Optional[float]:
-        """Get feed rate from user"""
-        dialog = tk.Toplevel()
-        dialog.title("Export Settings")
-        dialog.geometry("300x150")
-        dialog.transient()
-        dialog.grab_set()
-
-        result = {"feed_rate": None}
-
-        # Feed rate input
-        ttk.Label(dialog, text="Feed Rate (mm/min):").pack(pady=10)
-        feed_var = tk.StringVar(value="1000")
-        feed_entry = ttk.Entry(dialog, textvariable=feed_var)
-        feed_entry.pack(pady=5)
-        feed_entry.focus()
-
-        # Buttons
-        button_frame = ttk.Frame(dialog)
-        button_frame.pack(pady=10)
-
-        def on_ok():
-            try:
-                result["feed_rate"] = float(feed_var.get())
-                dialog.destroy()
-            except ValueError:
-                messagebox.showerror("Error", "Invalid feed rate")
-
-        def on_cancel():
-            dialog.destroy()
-
-        ttk.Button(button_frame, text="OK", command=on_ok).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
-
-        # Handle Enter key
-        feed_entry.bind('<Return>', lambda e: on_ok())
-
-        dialog.wait_window()
-        return result["feed_rate"]
 
     def update_svg_info(self):
         """Update SVG routes information display"""
@@ -244,7 +150,6 @@ class SVGRoutesPanel:
                 'routes_loaded': self.routes_loaded,
                 'routes_count': self.get_routes_count(),
                 'camera_connected': self.camera_connected,
-                'registration_available': self.registration_available,
                 'routes_service_status': self.routes_service.get_service_status() if self.routes_service else None
             }
         except Exception as e:

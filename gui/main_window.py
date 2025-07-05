@@ -26,15 +26,15 @@ from services.event_broker import (event_aware, event_handler, EventBroker, Even
 from services.events import ApplicationEvents
 from services.grbl_controller import GRBLController, GRBLEvents
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
-from services.overlays.svg_routes_overlay import SVGRoutesOverlay
 from services.registration_manager import RegistrationManager, RegistrationEvents
+from services.routes_manager import RouteManager
 
 
 @event_aware()
 class RegistrationGUI:
     """Main GUI window for GRBL Camera Registration application with Machine Area Visualization"""
 
-    def __init__(self, root):
+    def __init__(self, root, grbl_controller, camera_manager, registration_manager, route_manager):
         self.root = root
         self.root.title("GRBL Camera Registration with Machine Area Visualization")
         self.root.geometry("1600x900")
@@ -60,9 +60,10 @@ class RegistrationGUI:
         self.setup_event_logging()
 
         # Controllers and managers
-        self.grbl_controller = GRBLController()
-        self.camera_manager = CameraManager()
-        self.registration_manager = RegistrationManager()
+        self.grbl_controller = grbl_controller
+        self.camera_manager = camera_manager
+        self.registration_manager = registration_manager
+        self.route_manager = route_manager
 
         self.setup_gui()
 
@@ -360,21 +361,21 @@ class RegistrationGUI:
         )
         self.camera_display.inject_overlay("markers", self.marker_overlay)
 
-        # Create and inject routes overlay
-        self.routes_overlay = SVGRoutesOverlay(
-            registration_manager=self.registration_manager, logger=self.log
-        )
-        self.camera_display.inject_overlay("routes", self.routes_overlay)
+        # # Create and inject routes overlay
+        # self.routes_overlay = SVGRoutesOverlay(
+        #     registration_manager=self.registration_manager, logger=self.log
+        # )
+        # self.camera_display.inject_overlay("routes", self.routes_overlay)
 
         # Configure overlays
         self.marker_overlay.set_visibility(True)
-        self.routes_overlay.set_visibility(False)  # Hidden by default
+        # self.routes_overlay.set_visibility(False)  # Hidden by default
 
         # Create SVG routes panel now that overlays are ready
         # Get the parent frame from the control panel setup
         control_parent = self.connection_panel.frame.master
         self.svg_panel = SVGRoutesPanel(
-            control_parent, self.routes_overlay, self.log
+            control_parent, self.route_manager, self.log
         )
 
     def setup_debug_panel(self, parent):
@@ -915,52 +916,3 @@ class RegistrationGUI:
         self.grbl_controller.disconnect()
 
         self.root.destroy()
-
-
-def main():
-    """Main application entry point"""
-    try:
-        # Create main window
-        root = tk.Tk()
-
-        # Set window icon if available
-        try:
-            root.iconbitmap('icon.ico')  # Add your icon file if available
-        except:
-            pass
-
-        # Create application
-        app = RegistrationGUI(root)
-
-        # Bind window close event
-        root.protocol("WM_DELETE_WINDOW", app.on_closing)
-
-        # Center window on screen
-        root.update_idletasks()
-        width = root.winfo_width()
-        height = root.winfo_height()
-        x = (root.winfo_screenwidth() // 2) - (width // 2)
-        y = (root.winfo_screenheight() // 2) - (height // 2)
-        root.geometry(f'{width}x{height}+{x}+{y}')
-
-        # Configure GRBL logging (default to quiet mode)
-        app.configure_grbl_logging(verbose=False)
-
-        # Start main loop
-        print("Starting GRBL Camera Registration with Machine Area Visualization...")
-        print("Keyboard shortcuts:")
-        print("  F10: Toggle Machine Area Window")
-        print("  F11: Center Machine Area View")
-        print("  F12: Clear Movement Trail")
-        print("  Right-click: Context Menu")
-        print("\nLogging Configuration:")
-        print("  - GRBL: Quiet mode (minimal logging)")
-        print("  - Debug Panel: Full event display with color coding")
-        print("  - Use app.configure_grbl_logging(verbose=True) for full GRBL debug")
-
-        root.mainloop()
-
-    except Exception as e:
-        print(f"Error starting application: {e}")
-        import traceback
-        traceback.print_exc()

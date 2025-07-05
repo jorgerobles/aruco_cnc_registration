@@ -32,10 +32,9 @@ class RouteManager:
         self.routes_loaded = False
         self.current_file = None
 
-        # Transformation data (for camera registration)
+        # Transformation data (for registration)
         self.transformation_matrix = None
         self.transformed_routes = []
-        self.camera_position = None  # Camera position in machine coordinates
 
         # Statistics
         self.total_length = 0.0
@@ -100,7 +99,6 @@ class RouteManager:
         self.current_file = None
         self.transformation_matrix = None
         self.transformed_routes = []
-        self.camera_position = None
         self.total_length = 0.0
         self.point_count = 0
 
@@ -141,17 +139,7 @@ class RouteManager:
             'bounds': self.route_bounds.copy() if self.route_bounds else None,
             'total_length': self.total_length,
             'has_transformation': self.transformation_matrix is not None,
-            'camera_position': self.camera_position.copy() if self.camera_position else None
         }
-
-    def set_camera_position(self, position: List[float]):
-        """Set camera position for visualization"""
-        self.camera_position = position[:2] if position else None  # Only X, Y
-        self.log(f"Camera position set to: {self.camera_position}")
-
-    def get_camera_position(self) -> Optional[List[float]]:
-        """Get camera position"""
-        return self.camera_position.copy() if self.camera_position else None
 
     def set_transformation_matrix(self, matrix: np.ndarray):
         """Set transformation matrix for camera registration"""
@@ -313,5 +301,4 @@ class RouteManager:
             'current_file': self.current_file,
             'has_transformation': self.transformation_matrix is not None,
             'transformed_routes_count': len(self.transformed_routes) if self.transformed_routes else 0,
-            'camera_position': self.camera_position
         }
