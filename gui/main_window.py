@@ -301,7 +301,7 @@ class RegistrationGUI:
     def setup_control_panel(self, parent):
         """Setup the left control panel with all sub-panels"""
         # Create scrollable frame for controls
-        canvas = tk.Canvas(parent, width=300)
+        canvas = tk.Canvas(parent, width=450)
         scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas)
 
@@ -309,6 +309,21 @@ class RegistrationGUI:
             "<Configure>",
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
+
+        # Mouse wheel support
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_to_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_from_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind('<Enter>', _bind_to_mousewheel)
+        canvas.bind('<Leave>', _unbind_from_mousewheel)
+        scrollable_frame.bind('<Enter>', _bind_to_mousewheel)
+        scrollable_frame.bind('<Leave>', _unbind_from_mousewheel)
 
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
@@ -380,9 +395,6 @@ class RegistrationGUI:
                 self.log
             )
 
-            # Add controls (with fallback handling)
-            self.add_machine_area_controls()
-
             # Add keyboard shortcuts
             self.setup_machine_area_shortcuts()
 
@@ -394,76 +406,7 @@ class RegistrationGUI:
             # Continue without machine area window - don't let this break the app
             self.machine_area_window = None
 
-    def add_machine_area_controls(self):
-        """Add machine area controls to debug panel"""
-        # Try different ways to find the debug panel container
-        debug_frame = None
 
-        if hasattr(self, 'debug_panel') and self.debug_panel:
-            # Try common attribute names for the debug panel container
-            for attr_name in ['frame', 'main_frame', 'container', 'parent']:
-                if hasattr(self.debug_panel, attr_name):
-                    debug_frame = getattr(self.debug_panel, attr_name)
-                    break
-
-        # If debug panel frame not found, add to main window
-        if debug_frame is None:
-            self.log("Debug panel frame not found, adding machine area controls to main window", "warning")
-            # Create a separate window for machine area controls
-            self.create_machine_area_control_window()
-            return
-
-        try:
-            # Create machine area controls frame
-            machine_frame = tk.LabelFrame(debug_frame, text="🗺️ Machine Area Visualization")
-            machine_frame.pack(fill=tk.X, pady=5)
-
-            # Button frame
-            btn_frame = tk.Frame(machine_frame)
-            btn_frame.pack(fill=tk.X, padx=5, pady=2)
-
-            # Main toggle button
-            self.machine_area_toggle_button = tk.Button(
-                btn_frame,
-                text="Show Machine Area",
-                command=self.toggle_machine_area_window,
-                bg='#4a90e2',
-                fg='white',
-                font=('Arial', 9, 'bold'),
-                relief='raised'
-            )
-            self.machine_area_toggle_button.pack(side=tk.LEFT, padx=2)
-
-            # Quick settings frame
-            settings_frame = tk.Frame(btn_frame)
-            settings_frame.pack(side=tk.RIGHT)
-
-            tk.Label(settings_frame, text="Quick Setup:", font=('Arial', 8)).pack(side=tk.LEFT, padx=2)
-
-            # Machine size quick buttons
-            for size in [200, 300, 400]:
-                btn = tk.Button(
-                    settings_frame,
-                    text=f"{size}mm",
-                    command=lambda s=size: self.set_machine_bounds_quick(s, s),
-                    font=('Arial', 7),
-                    relief='groove'
-                )
-                btn.pack(side=tk.LEFT, padx=1)
-
-            # Info frame
-            info_frame = tk.Frame(machine_frame)
-            info_frame.pack(fill=tk.X, padx=5, pady=2)
-
-            info_text = "F10: Toggle | F11: Center | F12: Clear Trail | Right-click: Context Menu"
-            tk.Label(info_frame, text=info_text, font=('Arial', 7), fg='gray').pack()
-
-            self.log("Machine area controls added to debug panel")
-
-        except Exception as e:
-            self.log(f"Error adding machine area controls to debug panel: {e}", "error")
-            # Fallback to control window
-            self.create_machine_area_control_window()
 
     def create_machine_area_control_window(self):
         """Create separate control window for machine area if debug panel integration fails"""
