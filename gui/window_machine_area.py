@@ -21,11 +21,11 @@ from services.registration_manager import RegistrationEvents
 class MachineAreaWindow:
     """Floating window displaying machine area, routes, camera position and frame bounds"""
 
-    def __init__(self, parent_window, grbl_controller, registration_manager, routes_overlay, camera_manager=None, logger: Optional[Callable] = None):
+    def __init__(self, parent_window, grbl_controller, registration_manager, routes_service, camera_manager=None, logger: Optional[Callable] = None):
         self.parent_window = parent_window
         self.grbl_controller = grbl_controller
         self.registration_manager = registration_manager
-        self.routes_overlay = routes_overlay
+        self.routes_service = routes_service
         self.camera_manager = camera_manager  # Add camera manager
         self.logger = logger
 
@@ -1163,7 +1163,7 @@ def add_machine_area_window_to_main(main_window_class):
             self.root,
             self.grbl_controller,
             self.registration_manager,
-            self.routes_service,  # Changed from routes_overlay to routes_service
+            self.routes_service,  # Changed from routes_service to routes_service
             camera_manager,  # Pass camera manager
             self.log
         )

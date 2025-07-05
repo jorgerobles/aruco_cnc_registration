@@ -391,7 +391,8 @@ class RegistrationGUI:
                 self.root,
                 self.grbl_controller,
                 self.registration_manager,
-                self.routes_overlay,
+                self.route_manager,
+                self.camera_manager,
                 self.log
             )
 
