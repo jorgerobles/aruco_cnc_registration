@@ -194,12 +194,34 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
             raise ValueError(f"Not a real-time command: {command}")
 
     def get_position(self) -> List[float]:
-        """Get current machine position"""
+        """Get current machine position - FIXED to actually read MPOS"""
+        if not self.is_connected:
+            raise Exception("GRBL not connected")
+
         try:
-            self._update_position()
-            return self.current_position.copy()
-        except:
-            return [0.0, 0.0, 0.0]
+            responses = self._send_and_wait("?", 3.0)
+
+            for response in responses:
+                if response.startswith('<') and response.endswith('>'):
+                    # Parse status response: <Idle|MPos:0.000,0.000,0.000|FS:0,0>
+                    parts = response[1:-1].split('|')
+
+                    for part in parts:
+                        if part.startswith('MPos:'):
+                            coords_str = part[5:]  # Remove 'MPos:'
+                            coords = [float(x.strip()) for x in coords_str.split(',')]
+
+                            if len(coords) >= 3:
+                                # Update internal position and return
+                                self.current_position = coords[:3]
+                                return coords[:3]
+
+            # If we get here, no position was found in response
+            raise Exception("No MPos data found in GRBL status response")
+
+        except Exception as e:
+            # DON'T return [0,0,0] silently - raise the error so caller knows there's a problem
+            raise Exception(f"Failed to read machine position: {e}")
 
     def get_status(self) -> str:
         """Get current machine status"""
