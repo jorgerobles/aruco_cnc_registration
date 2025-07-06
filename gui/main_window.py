@@ -15,6 +15,7 @@ from gui.camera_display import CameraDisplay
 from gui.panel_camera import CameraPanel
 from gui.panel_commands import GRBLCommandPanel
 from gui.panel_debug import DebugPanel
+from gui.panel_hardware import MachineConfigPanel
 from gui.panel_jogger import JogPanel
 from gui.panel_machine import MachinePanel
 from gui.panel_machine_area import MachineAreaPanel
@@ -34,6 +35,7 @@ class RegistrationGUI:
     """Main GUI window for GRBL Camera Registration application with Machine Area Visualization"""
 
     def __init__(self, root, grbl_controller, camera_manager, registration_manager, route_manager, hardware_service):
+        self.machine_config_panel = None
         self.root = root
         self.root.title("GRBL Camera Registration with Machine Area Visualization")
         self.root.geometry("1600x900")
@@ -335,7 +337,7 @@ class RegistrationGUI:
         self.connection_panel = MachinePanel(scrollable_frame, self.grbl_controller)
 
         # CameraPanel handles all camera functionality
-        self.calibration_panel = CameraPanel(scrollable_frame, self.camera_manager, self.hardware_service)
+        self.calibration_panel = CameraPanel(scrollable_frame, self.camera_manager, self.log)
 
         self.machine_panel = JogPanel(scrollable_frame, self.grbl_controller)
 
@@ -346,6 +348,13 @@ class RegistrationGUI:
             self.capture_point,
             self.test_position,
             self.set_work_offset
+        )
+
+        self.machine_config_panel = MachineConfigPanel(
+            scrollable_frame,
+            self.grbl_controller,
+            self.hardware_service,
+            self.log
         )
 
     def setup_display_panel(self, parent):

@@ -1,6 +1,7 @@
 """
-Machine Area Canvas Component
-Handles canvas display, zoom, pan, and drawing operations
+Updated Machine Area Canvas Component
+Enhanced to properly handle negative coordinate bounds like (-450,-450) to (0,0)
+Includes origin marker and proper coordinate transformation
 """
 
 import tkinter as tk
@@ -9,7 +10,7 @@ import numpy as np
 
 
 class MachineAreaCanvas:
-    """Canvas component for machine area visualization with zoom/pan interactions"""
+    """Canvas component for machine area visualization with negative bounds support"""
 
     def __init__(self, parent, width: int = 400, height: int = 400, logger: Optional[Callable] = None):
         self.parent = parent
@@ -42,10 +43,10 @@ class MachineAreaCanvas:
         self.margin = 30
         self.scale_factor = 1.0
 
-        # Machine bounds for coordinate transformation
+        # Machine bounds for coordinate transformation (will be set by parent)
         self.machine_bounds = {
-            'x_min': 0.0, 'x_max': 400.0,
-            'y_min': 0.0, 'y_max': 400.0
+            'x_min': 0.0, 'x_max': 450.0,
+            'y_min': 0.0, 'y_max': 450.0
         }
 
         # Colors
@@ -59,7 +60,9 @@ class MachineAreaCanvas:
             'camera_frame': '#ff6b35',
             'calibration_points': '#9013fe',
             'grid': '#404040',
-            'text': '#ffffff'
+            'text': '#ffffff',
+            'origin_marker': '#ff0000',
+            'axes': '#888888'
         }
 
         # Setup mouse interactions
@@ -176,6 +179,10 @@ class MachineAreaCanvas:
         self.calculate_scale_factor()
         self._trigger_redraw()
 
+        # Log bounds for debugging
+        if self.logger:
+            self.logger(f"Canvas bounds set: X({x_min:.0f},{x_max:.0f}) Y({y_min:.0f},{y_max:.0f})")
+
     def calculate_scale_factor(self):
         """Calculate scale factor to fit machine bounds in canvas"""
         available_width = self.canvas_width - 2 * self.margin
@@ -194,7 +201,7 @@ class MachineAreaCanvas:
 
     def machine_to_canvas(self, x: float, y: float) -> Tuple[int, int]:
         """Convert machine coordinates to canvas coordinates with zoom and pan"""
-        # Apply base transformation
+        # Apply base transformation (handles negative coordinates correctly)
         base_x = self.margin + (x - self.machine_bounds['x_min']) * self.scale_factor
         base_y = self.canvas_height - self.margin - (y - self.machine_bounds['y_min']) * self.scale_factor
 
@@ -211,22 +218,65 @@ class MachineAreaCanvas:
         """Clear the canvas"""
         self.canvas.delete("all")
 
-    def draw_grid(self, grid_spacing: float = 20.0):
-        """Draw coordinate grid"""
-        # Vertical lines
-        x = self.machine_bounds['x_min']
-        while x <= self.machine_bounds['x_max']:
-            x1, y1 = self.machine_to_canvas(x, self.machine_bounds['y_min'])
-            x2, y2 = self.machine_to_canvas(x, self.machine_bounds['y_max'])
-            self.canvas.create_line(x1, y1, x2, y2, fill=self.colors['grid'], width=1)
+    def draw_grid(self, grid_spacing: float = 50.0):
+        """Draw coordinate grid with proper spacing for negative coordinates"""
+        # Calculate grid line positions
+        x_min = self.machine_bounds['x_min']
+        x_max = self.machine_bounds['x_max']
+        y_min = self.machine_bounds['y_min']
+        y_max = self.machine_bounds['y_max']
+
+        # Adjust grid spacing based on coordinate range
+        coord_range = max(x_max - x_min, y_max - y_min)
+        if coord_range > 1000:
+            grid_spacing = 100.0
+        elif coord_range > 500:
+            grid_spacing = 50.0
+        elif coord_range > 200:
+            grid_spacing = 25.0
+        else:
+            grid_spacing = 10.0
+
+        # Draw vertical lines
+        x_start = int(x_min / grid_spacing) * grid_spacing
+        x = x_start
+        while x <= x_max:
+            if x_min <= x <= x_max:
+                x1, y1 = self.machine_to_canvas(x, y_min)
+                x2, y2 = self.machine_to_canvas(x, y_max)
+
+                # Highlight zero line
+                color = self.colors['axes'] if x == 0 else self.colors['grid']
+                width = 2 if x == 0 else 1
+
+                self.canvas.create_line(x1, y1, x2, y2, fill=color, width=width)
+
+                # Add coordinate labels for major lines
+                if x % (grid_spacing * 2) == 0:
+                    label_x, label_y = self.machine_to_canvas(x, y_min)
+                    self.canvas.create_text(label_x, label_y + 15, text=f"{x:.0f}",
+                                          fill=self.colors['text'], font=('Arial', 8))
             x += grid_spacing
 
-        # Horizontal lines
-        y = self.machine_bounds['y_min']
-        while y <= self.machine_bounds['y_max']:
-            x1, y1 = self.machine_to_canvas(self.machine_bounds['x_min'], y)
-            x2, y2 = self.machine_to_canvas(self.machine_bounds['x_max'], y)
-            self.canvas.create_line(x1, y1, x2, y2, fill=self.colors['grid'], width=1)
+        # Draw horizontal lines
+        y_start = int(y_min / grid_spacing) * grid_spacing
+        y = y_start
+        while y <= y_max:
+            if y_min <= y <= y_max:
+                x1, y1 = self.machine_to_canvas(x_min, y)
+                x2, y2 = self.machine_to_canvas(x_max, y)
+
+                # Highlight zero line
+                color = self.colors['axes'] if y == 0 else self.colors['grid']
+                width = 2 if y == 0 else 1
+
+                self.canvas.create_line(x1, y1, x2, y2, fill=color, width=width)
+
+                # Add coordinate labels for major lines
+                if y % (grid_spacing * 2) == 0:
+                    label_x, label_y = self.machine_to_canvas(x_min, y)
+                    self.canvas.create_text(label_x - 15, label_y, text=f"{y:.0f}",
+                                          fill=self.colors['text'], font=('Arial', 8))
             y += grid_spacing
 
     def draw_machine_bounds(self):
@@ -236,11 +286,74 @@ class MachineAreaCanvas:
 
         self.canvas.create_rectangle(x1, y2, x2, y1, outline=self.colors['machine_bounds'], width=2, fill="")
 
-        # Add coordinate labels
-        self.canvas.create_text(x1 + 5, y1 - 5, text="(0,0)", fill=self.colors['text'], anchor=tk.SW)
+        # Add coordinate labels at corners
+        bounds = self.machine_bounds
+
+        # Bottom-left corner
+        self.canvas.create_text(x1 + 5, y1 - 5,
+                              text=f"({bounds['x_min']:.0f},{bounds['y_min']:.0f})",
+                              fill=self.colors['text'], anchor=tk.SW, font=('Arial', 8))
+
+        # Top-right corner
         self.canvas.create_text(x2 - 5, y2 + 5,
-                                text=f"({self.machine_bounds['x_max']},{self.machine_bounds['y_max']})",
-                                fill=self.colors['text'], anchor=tk.NE)
+                              text=f"({bounds['x_max']:.0f},{bounds['y_max']:.0f})",
+                              fill=self.colors['text'], anchor=tk.NE, font=('Arial', 8))
+
+    def draw_origin_marker(self):
+        """Draw origin marker at (0,0) - important for negative coordinate systems"""
+        try:
+            # Check if origin (0,0) is within bounds
+            if (self.machine_bounds['x_min'] <= 0 <= self.machine_bounds['x_max'] and
+                self.machine_bounds['y_min'] <= 0 <= self.machine_bounds['y_max']):
+
+                origin_x, origin_y = self.machine_to_canvas(0, 0)
+
+                # Draw origin crosshairs
+                size = 12
+                self.canvas.create_line(origin_x - size, origin_y, origin_x + size, origin_y,
+                                      fill=self.colors['origin_marker'], width=3)
+                self.canvas.create_line(origin_x, origin_y - size, origin_x, origin_y + size,
+                                      fill=self.colors['origin_marker'], width=3)
+
+                # Draw origin circle
+                radius = 6
+                self.canvas.create_oval(origin_x - radius, origin_y - radius,
+                                      origin_x + radius, origin_y + radius,
+                                      outline=self.colors['origin_marker'], width=2, fill="")
+
+                # Add origin label
+                self.canvas.create_text(origin_x + 15, origin_y - 15, text="ORIGIN (0,0)",
+                                      fill=self.colors['origin_marker'], anchor=tk.W,
+                                      font=('Arial', 10, 'bold'))
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Error drawing origin marker: {e}", "error")
+
+    def draw_homing_position(self, homing_pos: dict):
+        """Draw homing position marker - where machine goes when homing"""
+        try:
+            x, y = homing_pos['x'], homing_pos['y']
+
+            # Check if homing position is within visible bounds
+            if (self.machine_bounds['x_min'] <= x <= self.machine_bounds['x_max'] and
+                self.machine_bounds['y_min'] <= y <= self.machine_bounds['y_max']):
+
+                home_x, home_y = self.machine_to_canvas(x, y)
+
+                # Draw homing position as square
+                size = 8
+                self.canvas.create_rectangle(home_x - size, home_y - size,
+                                           home_x + size, home_y + size,
+                                           fill=self.colors['text'], outline=self.colors['origin_marker'], width=2)
+
+                # Add homing label
+                self.canvas.create_text(home_x + 12, home_y + 12,
+                                      text=f"HOME ({x:.0f},{y:.0f})",
+                                      fill=self.colors['text'], anchor=tk.W,
+                                      font=('Arial', 9, 'bold'))
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Error drawing homing position: {e}", "error")
 
     def draw_routes(self, routes_bounds: List[float]):
         """Draw routes bounds rectangle"""
@@ -258,7 +371,8 @@ class MachineAreaCanvas:
             center_y = (y1 + y2) // 2
             self.canvas.create_text(center_x, center_y, text="Routes", fill=self.colors['routes'], anchor=tk.CENTER)
         except Exception as e:
-            self.log(f"Error drawing routes: {e}", "error")
+            if self.logger:
+                self.logger(f"Error drawing routes: {e}", "error")
 
     def draw_route_paths(self, routes: List[List[Tuple[float, float]]], route_colors: List[str]):
         """Draw actual route paths"""
@@ -303,16 +417,17 @@ class MachineAreaCanvas:
         canvas_x, canvas_y = self.machine_to_canvas(x, y)
 
         # Draw machine position as cross
-        size = 6
+        size = 8
         self.canvas.create_line(canvas_x - size, canvas_y, canvas_x + size, canvas_y,
                                 fill=self.colors['machine_position'], width=3)
         self.canvas.create_line(canvas_x, canvas_y - size, canvas_x, canvas_y + size,
                                 fill=self.colors['machine_position'], width=3)
 
         # Add position label
-        self.canvas.create_text(canvas_x + 10, canvas_y - 10,
+        self.canvas.create_text(canvas_x + 12, canvas_y - 12,
                                 text=f"M({x:.1f},{y:.1f})",
-                                fill=self.colors['machine_position'], anchor=tk.W)
+                                fill=self.colors['machine_position'], anchor=tk.W,
+                                font=('Arial', 9, 'bold'))
 
     def draw_camera_position(self, position: Tuple[float, float]):
         """Draw current camera position"""
@@ -320,15 +435,16 @@ class MachineAreaCanvas:
         canvas_x, canvas_y = self.machine_to_canvas(x, y)
 
         # Draw camera position as circle
-        radius = 5
+        radius = 6
         self.canvas.create_oval(canvas_x - radius, canvas_y - radius,
                                 canvas_x + radius, canvas_y + radius,
                                 fill=self.colors['camera_position'], outline="white", width=2)
 
         # Add position label
-        self.canvas.create_text(canvas_x + 10, canvas_y + 10,
+        self.canvas.create_text(canvas_x + 12, canvas_y + 12,
                                 text=f"C({x:.1f},{y:.1f})",
-                                fill=self.colors['camera_position'], anchor=tk.W)
+                                fill=self.colors['camera_position'], anchor=tk.W,
+                                font=('Arial', 9))
 
     def draw_camera_frame(self, frame_bounds: dict):
         """Draw camera frame bounds based on resolution"""
@@ -343,7 +459,7 @@ class MachineAreaCanvas:
             self.canvas.create_rectangle(x1, y2, x2, y1, outline=self.colors['camera_frame'], width=3, fill="")
 
             # Draw corner markers
-            corner_size = 8
+            corner_size = 10
             corners = [(x1, y2), (x2, y2), (x1, y1), (x2, y1)]
             corner_offsets = [(corner_size, corner_size), (-corner_size, corner_size),
                               (corner_size, -corner_size), (-corner_size, -corner_size)]
@@ -356,17 +472,18 @@ class MachineAreaCanvas:
             center_x = (x1 + x2) // 2
             center_y = (y1 + y2) // 2
 
-            frame_info = f"Frame: {frame_bounds.get('width_mm', 0):.1f}x{frame_bounds.get('height_mm', 0):.1f}mm"
+            frame_info = f"Frame: {frame_bounds.get('width_mm', 0):.1f}×{frame_bounds.get('height_mm', 0):.1f}mm"
 
             # Background for text
-            self.canvas.create_rectangle(center_x - 40, center_y - 10, center_x + 40, center_y + 10,
+            self.canvas.create_rectangle(center_x - 50, center_y - 10, center_x + 50, center_y + 10,
                                          fill=self.colors['background'], outline=self.colors['camera_frame'], width=1)
 
             self.canvas.create_text(center_x, center_y, text=frame_info,
                                     fill=self.colors['camera_frame'], anchor=tk.CENTER, font=('Arial', 8))
 
         except Exception as e:
-            self.log(f"Error drawing camera frame: {e}", "error")
+            if self.logger:
+                self.logger(f"Error drawing camera frame: {e}", "error")
 
     def draw_calibration_points(self, points: List[Tuple[float, float]]):
         """Draw calibration points"""
@@ -374,12 +491,13 @@ class MachineAreaCanvas:
             canvas_x, canvas_y = self.machine_to_canvas(x, y)
 
             # Draw point
-            self.canvas.create_oval(canvas_x - 3, canvas_y - 3, canvas_x + 3, canvas_y + 3,
+            self.canvas.create_oval(canvas_x - 4, canvas_y - 4, canvas_x + 4, canvas_y + 4,
                                     fill=self.colors['calibration_points'], outline="white", width=1)
 
             # Add point number
-            self.canvas.create_text(canvas_x + 8, canvas_y - 8, text=str(i + 1),
-                                    fill=self.colors['calibration_points'], anchor=tk.W)
+            self.canvas.create_text(canvas_x + 10, canvas_y - 10, text=str(i + 1),
+                                    fill=self.colors['calibration_points'], anchor=tk.W,
+                                    font=('Arial', 8, 'bold'))
 
     def get_view_info(self) -> dict:
         """Get current view information"""

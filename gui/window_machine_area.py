@@ -1,6 +1,7 @@
 """
-Refactored Machine Area Visualization Window
-Separates canvas and controls into distinct components
+Updated Machine Area Window
+Now properly uses calculated bounds from hardware service and origin configuration
+Supports negative coordinate systems like (-450,-450) to (0,0)
 """
 
 import threading
@@ -20,11 +21,9 @@ from services.hardware_service import HardwareEvents
 from services.registration_manager import RegistrationEvents
 
 
-
-
 @event_aware()
 class MachineAreaWindow:
-    """Refactored machine area visualization window with separated components"""
+    """Machine area visualization window with hardware service bounds integration"""
 
     def __init__(self, parent_window, grbl_controller, registration_manager, routes_service,
                  hardware_service, camera_manager, logger: Optional[Callable] = None):
@@ -65,23 +64,66 @@ class MachineAreaWindow:
         # Route colors
         self.route_colors = ['#f5a623', '#7ed321', '#d0021b', '#9013fe', '#50e3c2']
 
-        # Get initial machine size
-        machine_size = self.hardware_service.get_machine_size()
-        self.machine_bounds = {
-            'x_min': 0.0, 'x_max': machine_size['x'],
-            'y_min': 0.0, 'y_max': machine_size['y'],
-            'z_min': 0.0, 'z_max': machine_size['z']
-        }
+        # Initialize machine bounds from hardware service
+        self.machine_bounds = {}  # Initialize empty first
+        self._update_machine_bounds_from_hardware()
 
         # Update rate
         self.update_rate_ms = 500
 
-        self.log("Refactored Machine Area Visualization initialized")
+        self.log("Machine Area Window initialized with hardware service bounds")
 
     def log(self, message: str, level: str = "info"):
         """Log message if logger is available"""
         if self.logger:
             self.logger(message, level)
+
+    def _update_machine_bounds_from_hardware(self):
+        """Update machine bounds from hardware service"""
+        try:
+            if self.hardware_service:
+                # Get calculated bounds from hardware service
+                bounds = self.hardware_service.get_machine_bounds()
+
+                # FORCE update machine bounds - don't use defaults
+                self.machine_bounds = bounds.copy()  # Use the exact bounds from hardware service
+
+                # Log the bounds for debugging
+                origin_name = self.hardware_service.get_machine_origin_name()
+                homing = self.hardware_service.get_homing_coordinates()
+
+                self.log(f"BOUNDS UPDATE: Origin={origin_name}, Bounds=X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
+
+                # IMMEDIATELY update canvas if it exists
+                if self.canvas_component:
+                    self.canvas_component.set_machine_bounds(
+                        bounds['x_min'], bounds['y_min'],
+                        bounds['x_max'], bounds['y_max']
+                    )
+                    self.log(f"Canvas bounds updated to: X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
+
+                # Update controls if they exist
+                if self.controls_component:
+                    size = self.hardware_service.get_machine_size()
+                    self.controls_component.set_machine_bounds(size['x'], size['y'])
+
+            else:
+                self.log("ERROR: No hardware service - cannot get bounds", "error")
+                # Only use fallback if no hardware service
+                self.machine_bounds = {
+                    'x_min': 0.0, 'x_max': 450.0,
+                    'y_min': 0.0, 'y_max': 450.0,
+                    'z_min': 0.0, 'z_max': 80.0
+                }
+
+        except Exception as e:
+            self.log(f"ERROR updating machine bounds: {e}", "error")
+            # Only use safe defaults on error
+            self.machine_bounds = {
+                'x_min': 0.0, 'x_max': 450.0,
+                'y_min': 0.0, 'y_max': 450.0,
+                'z_min': 0.0, 'z_max': 80.0
+            }
 
     # Event handlers
     @event_handler(GRBLEvents.POSITION_CHANGED)
@@ -150,6 +192,22 @@ class MachineAreaWindow:
         except Exception as e:
             self.log(f"Error handling camera offset update: {e}", "error")
 
+    @event_handler(HardwareEvents.MACHINE_SIZE_UPDATED, EventPriority.HIGH)
+    def _on_machine_size_updated(self, data: dict):
+        """Handle machine size updates - recalculate bounds"""
+        self.log(f"Machine size updated: {data['x']}×{data['y']}×{data['z']}mm")
+        self._update_machine_bounds_from_hardware()
+        if self.is_visible:
+            self.schedule_update()
+
+    @event_handler(HardwareEvents.MACHINE_ORIGIN_UPDATED, EventPriority.HIGH)
+    def _on_machine_origin_updated(self, data: dict):
+        """Handle machine origin updates - recalculate bounds"""
+        self.log(f"Machine origin updated: {data['origin_name']}")
+        self._update_machine_bounds_from_hardware()
+        if self.is_visible:
+            self.schedule_update()
+
     def show_window(self):
         """Show the machine area visualization window"""
         if self.window is not None:
@@ -178,7 +236,7 @@ class MachineAreaWindow:
         try:
             self.window = tk.Toplevel(self.parent_window)
             self.window.title("Machine Area Visualization")
-            self.window.geometry("900x600")  # Larger window to accommodate full canvas
+            self.window.geometry("900x600")
             self.window.resizable(True, True)
             self.window.attributes('-topmost', False)
             self.window.protocol("WM_DELETE_WINDOW", self.hide_window)
@@ -200,12 +258,16 @@ class MachineAreaWindow:
         canvas_frame = ttk.LabelFrame(main_frame, text="Machine Area View")
         canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        # Create canvas component that fills the entire canvas frame
+        # Create canvas component with current machine bounds
         self.canvas_component = MachineAreaCanvas(canvas_frame, logger=self.log)
-        self.canvas_component.set_machine_bounds(
-            self.machine_bounds['x_min'], self.machine_bounds['y_min'],
-            self.machine_bounds['x_max'], self.machine_bounds['y_max']
-        )
+
+        # FORCE set the bounds from hardware service
+        if self.machine_bounds:
+            self.canvas_component.set_machine_bounds(
+                self.machine_bounds['x_min'], self.machine_bounds['y_min'],
+                self.machine_bounds['x_max'], self.machine_bounds['y_max']
+            )
+            self.log(f"CANVAS SETUP: Set bounds to X({self.machine_bounds['x_min']:.0f},{self.machine_bounds['x_max']:.0f}) Y({self.machine_bounds['y_min']:.0f},{self.machine_bounds['y_max']:.0f})")
 
         # Controls frame (right side)
         controls_frame = ttk.LabelFrame(main_frame, text="Display Options")
@@ -214,9 +276,14 @@ class MachineAreaWindow:
         # Create controls component
         self.controls_component = MachineAreaControls(controls_frame, self.log)
 
-        # Set initial values in controls
-        self.controls_component.set_camera_config(self.camera_height_mm, self.pixels_per_mm)
-        self.controls_component.set_machine_bounds(self.machine_bounds['x_max'], self.machine_bounds['y_max'])
+        # Set initial values in controls from hardware service
+        if self.hardware_service:
+            try:
+                size = self.hardware_service.get_machine_size()
+                self.controls_component.set_machine_bounds(size['x'], size['y'])
+                self.controls_component.set_camera_config(self.camera_height_mm, self.pixels_per_mm)
+            except Exception as e:
+                self.log(f"Error setting initial control values: {e}", "error")
 
         # Status frame (bottom)
         status_frame = ttk.Frame(self.window)
@@ -236,7 +303,7 @@ class MachineAreaWindow:
             'reset_view': self.canvas_component.reset_view,
             'zoom_to_fit': self.canvas_component.zoom_to_fit,
             'camera_config_changed': self.on_camera_config_changed,
-            'bounds_changed': self.on_bounds_changed,
+            'bounds_changed': self.on_bounds_changed_from_controls,
             'auto_update_changed': self.on_auto_update_changed,
             'manual_update': self.manual_update,
             'center_view': self.center_view,
@@ -258,7 +325,6 @@ class MachineAreaWindow:
     # Component callback handlers
     def on_display_options_changed(self, options: dict):
         """Handle display option changes"""
-        # Options are automatically applied when drawing
         self.schedule_update()
 
     def on_camera_config_changed(self, config: dict):
@@ -272,20 +338,33 @@ class MachineAreaWindow:
         except Exception as e:
             self.log(f"Error updating camera config: {e}", "error")
 
-    def on_bounds_changed(self, bounds: dict):
-        """Handle machine bounds changes"""
+    def on_bounds_changed_from_controls(self, bounds: dict):
+        """Handle machine bounds changes from controls panel"""
         try:
-            self.machine_bounds['x_max'] = bounds['x_max']
-            self.machine_bounds['y_max'] = bounds['y_max']
+            # Update hardware service with new machine size
+            if self.hardware_service:
+                x_max = bounds['x_max']
+                y_max = bounds['y_max']
+                z_max = self.hardware_service.get_machine_size()['z']  # Keep current Z
 
-            self.canvas_component.set_machine_bounds(
-                self.machine_bounds['x_min'], self.machine_bounds['y_min'],
-                self.machine_bounds['x_max'], self.machine_bounds['y_max']
-            )
+                self.hardware_service.set_machine_size(x_max, y_max, z_max)
+                self.log(f"Machine size updated from controls: {x_max}×{y_max}×{z_max}mm")
 
-            self.log(f"Machine bounds updated: X={bounds['x_max']}, Y={bounds['y_max']}")
+                # Bounds will be automatically updated via hardware service event
+            else:
+                # Fallback: update bounds directly
+                self.machine_bounds['x_max'] = bounds['x_max']
+                self.machine_bounds['y_max'] = bounds['y_max']
+
+                self.canvas_component.set_machine_bounds(
+                    self.machine_bounds['x_min'], self.machine_bounds['y_min'],
+                    self.machine_bounds['x_max'], self.machine_bounds['y_max']
+                )
+
+                self.log(f"Machine bounds updated directly: X={bounds['x_max']}, Y={bounds['y_max']}")
+
         except Exception as e:
-            self.log(f"Error updating bounds: {e}", "error")
+            self.log(f"Error updating bounds from controls: {e}", "error")
 
     def on_auto_update_changed(self, enabled: bool):
         """Handle auto update toggle"""
@@ -316,13 +395,19 @@ class MachineAreaWindow:
         debug_info = [
             f"Routes: {len(self.actual_routes) if self.actual_routes else 0}",
             f"Camera pos: {self.current_camera_position}",
-            f"Routes bounds: {self.routes_bounds}"
+            f"Routes bounds: {self.routes_bounds}",
+            f"Machine bounds: X({self.machine_bounds['x_min']:.0f},{self.machine_bounds['x_max']:.0f}) Y({self.machine_bounds['y_min']:.0f},{self.machine_bounds['y_max']:.0f})"
         ]
 
         if self.canvas_component:
             view_info = self.canvas_component.get_view_info()
             debug_info.append(f"Zoom: {view_info['zoom_factor']:.2f}")
             debug_info.append(f"Pan: ({view_info['pan_offset'][0]:.0f}, {view_info['pan_offset'][1]:.0f})")
+
+        if self.hardware_service:
+            origin = self.hardware_service.get_machine_origin_name()
+            homing = self.hardware_service.get_homing_coordinates()
+            debug_info.append(f"Origin: {origin} → Home({homing['x']:.0f},{homing['y']:.0f})")
 
         self.log(f"DEBUG: {'; '.join(debug_info)}", "info")
 
@@ -403,7 +488,7 @@ class MachineAreaWindow:
     def update_camera_position(self):
         """Update camera position based on machine position and offset"""
         try:
-            if hasattr(self, 'current_machine_position'):
+            if hasattr(self, 'current_machine_position') and self.hardware_service:
                 offset = self.hardware_service.get_camera_offset()
                 machine_pos = self.current_machine_position
                 camera_x = machine_pos[0] + offset['x']
@@ -514,6 +599,14 @@ class MachineAreaWindow:
             if display_options['show_machine_bounds']:
                 self.canvas_component.draw_machine_bounds()
 
+            # Draw origin marker (0,0) - where coordinate system origin is
+            self.canvas_component.draw_origin_marker()
+
+            # Draw homing position - where machine goes when homing
+            if self.hardware_service:
+                homing_pos = self.hardware_service.get_homing_position()
+                self.canvas_component.draw_homing_position(homing_pos)
+
             if display_options['show_route_paths'] and self.actual_routes:
                 self.canvas_component.draw_route_paths(self.actual_routes, self.route_colors)
             elif display_options['show_routes'] and self.routes_bounds:
@@ -549,6 +642,10 @@ class MachineAreaWindow:
             pos = self.current_machine_position
             status_lines.append(f"Machine: ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})")
 
+            # Machine bounds info
+            bounds = self.machine_bounds
+            status_lines.append(f"Bounds: X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
+
             # Camera status
             if self.current_camera_position:
                 cam_x, cam_y = self.current_camera_position
@@ -563,10 +660,11 @@ class MachineAreaWindow:
             else:
                 status_lines.append("Routes: None loaded")
 
-            # View status
+            # View status with origin info
             if self.canvas_component:
                 view_info = self.canvas_component.get_view_info()
-                status_lines.append(f"View: Zoom {view_info['zoom_factor']:.1f}x")
+                origin_name = self.hardware_service.get_machine_origin_name() if self.hardware_service else "unknown"
+                status_lines.append(f"View: Zoom {view_info['zoom_factor']:.1f}x | Origin: {origin_name}")
 
             # Update text widget
             self.status_text.delete(1.0, tk.END)
@@ -576,15 +674,30 @@ class MachineAreaWindow:
             self.log(f"Error updating status display: {e}", "error")
 
     # Public interface methods
-    def set_machine_bounds(self, x_max: float, y_max: float, x_min: float = 0.0, y_min: float = 0.0):
+    def set_machine_bounds(self, x_max: float, y_max: float, x_min: float = None, y_min: float = None):
         """Set machine bounds programmatically"""
-        self.machine_bounds = {'x_min': x_min, 'x_max': x_max, 'y_min': y_min, 'y_max': y_max}
+        if self.hardware_service:
+            # Update through hardware service for consistency
+            current_size = self.hardware_service.get_machine_size()
+            self.hardware_service.set_machine_size(
+                abs(x_max - (x_min or 0)),
+                abs(y_max - (y_min or 0)),
+                current_size['z']
+            )
+        else:
+            # Direct update as fallback
+            self.machine_bounds = {
+                'x_min': x_min or 0.0, 'x_max': x_max,
+                'y_min': y_min or 0.0, 'y_max': y_max,
+                'z_min': self.machine_bounds.get('z_min', 0.0),
+                'z_max': self.machine_bounds.get('z_max', 80.0)
+            }
 
-        if self.canvas_component:
-            self.canvas_component.set_machine_bounds(x_min, y_min, x_max, y_max)
-
-        if self.controls_component:
-            self.controls_component.set_machine_bounds(x_max, y_max)
+            if self.canvas_component:
+                self.canvas_component.set_machine_bounds(
+                    self.machine_bounds['x_min'], self.machine_bounds['y_min'],
+                    self.machine_bounds['x_max'], self.machine_bounds['y_max']
+                )
 
     def get_window_status(self) -> dict:
         """Get current window status"""
@@ -598,6 +711,13 @@ class MachineAreaWindow:
             'calibration_points_count': len(self.calibration_points)
         }
 
+        if self.hardware_service:
+            status['hardware_info'] = {
+                'origin': self.hardware_service.get_machine_origin_name(),
+                'machine_size': self.hardware_service.get_machine_size(),
+                'homing_coordinates': self.hardware_service.get_homing_coordinates()
+            }
+
         if self.canvas_component:
             view_info = self.canvas_component.get_view_info()
             status.update(view_info)
@@ -609,4 +729,4 @@ class MachineAreaWindow:
         self.stop_update_thread()
         if self.window:
             self.window.destroy()
-        self.log("Refactored machine area visualization cleaned up")
+        self.log("Machine area visualization cleaned up")
