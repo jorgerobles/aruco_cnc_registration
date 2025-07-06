@@ -482,14 +482,17 @@ class RegistrationGUI:
         def on_key_press(event):
             if event.keysym == 'F10':
                 self.toggle_machine_area_window()
-            elif event.keysym == 'F11' and hasattr(self, 'machine_area_window') and self.machine_area_window:
-                if self.machine_area_window.is_visible:
-                    self.machine_area_window.center_view()
-                    self.log("Machine area view centered")
-            elif event.keysym == 'F12' and hasattr(self, 'machine_area_window') and self.machine_area_window:
-                if self.machine_area_window.is_visible:
-                    self.machine_area_window.clear_movement_trail()
-                    self.log("Movement trail cleared")
+            elif event.keysym == 'F11' and self.machine_area_window and self.machine_area_window.is_visible:
+                self.machine_area_window.center_view()
+            elif event.keysym == 'F12' and self.machine_area_window and self.machine_area_window.is_visible:
+                self.machine_area_window.clear_movement_trail()
+            # NEW: Zoom shortcuts
+            elif event.keysym == 'plus' and self.machine_area_window and self.machine_area_window.is_visible:
+                self.machine_area_window.zoom_in()
+            elif event.keysym == 'minus' and self.machine_area_window and self.machine_area_window.is_visible:
+                self.machine_area_window.zoom_out()
+            elif event.keysym == 'Home' and self.machine_area_window and self.machine_area_window.is_visible:
+                self.machine_area_window.reset_view()
 
         self.root.bind('<KeyPress>', on_key_press)
 
