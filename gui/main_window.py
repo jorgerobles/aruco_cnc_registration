@@ -921,3 +921,7 @@ class RegistrationGUI:
         self.grbl_controller.disconnect()
 
         self.root.destroy()
+
+    @event_handler(GRBLEvents.POSITION_CHANGED)
+    def _on_position_changed(self, position):
+        print(f"Position changed to: {position}")

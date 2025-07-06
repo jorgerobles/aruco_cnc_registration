@@ -1,8 +1,7 @@
 """
-GRBL Controller - Clean implementation from scratch
-Same public API, much simpler internal implementation
-NO BACKGROUND THREADS - Immediate operations only
-FIXED: Simplified jogging and better position tracking
+GRBL Controller - FIXED position reading issue
+The problem was in get_position() method doing redundant parsing
+Now it uses the already-parsed position from _parse_status()
 """
 
 import time
@@ -41,7 +40,7 @@ class GRBLEvents:
 
 @event_aware()
 class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunication):
-    """Simple, clean GRBL Controller - same API, simpler implementation"""
+    """GRBL Controller with FIXED position reading"""
 
     def __init__(self):
         # Connection state
@@ -49,6 +48,10 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
         self._is_connected = False
         self.current_position = [0.0, 0.0, 0.0]  # X, Y, Z
         self.current_status = "Unknown"
+
+        # Position tracking
+        self._position_last_updated = 0
+        self._position_valid = False
 
         # Internal state
         self._grbl_detected = False
@@ -83,8 +86,8 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
                 self._grbl_detected = True
                 self._initialization_complete = True
 
-                # Get initial position
-                self._update_position()
+                # Get initial position - FIXED: Force position update
+                self._force_position_update()
 
                 self.emit(GRBLEvents.CONNECTED, True)
                 self._log("✅ Connected successfully")
@@ -136,10 +139,135 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
         self._initialization_complete = False
         self.current_position = [0.0, 0.0, 0.0]
         self.current_status = "Disconnected"
+        self._position_valid = False
 
         if was_connected:
             self.emit(GRBLEvents.DISCONNECTED)
             self._log("✅ Disconnected")
+
+    def get_position(self) -> List[float]:
+        """Get current machine position - FIXED implementation"""
+        if not self.is_connected:
+            raise Exception("GRBL not connected")
+
+        try:
+            # Check if we have a recent valid position (within last 2 seconds)
+            current_time = time.time()
+            if (self._position_valid and
+                (current_time - self._position_last_updated) < 2.0):
+                return self.current_position.copy()
+
+            # Need to update position
+            self._force_position_update()
+
+            if self._position_valid:
+                return self.current_position.copy()
+            else:
+                raise Exception("Failed to get valid position from GRBL")
+
+        except Exception as e:
+            self._log(f"❌ Position read failed: {e}")
+            raise Exception(f"Failed to read machine position: {e}")
+
+    def _force_position_update(self):
+        """Force position update by sending status query with enhanced logging"""
+        try:
+            self._log("🔄 Forcing position update...")
+
+            # Clear any buffered input first
+            if self.serial_connection and self.serial_connection.in_waiting:
+                buffered = self.serial_connection.read(self.serial_connection.in_waiting)
+                self._log(f"🧹 Cleared {len(buffered)} buffered bytes")
+
+            # Send status query and process response
+            responses = self._send_and_wait("?", 3.0)
+            self._log(f"📥 Status query responses: {responses}")
+
+            # Check if position was updated during the query
+            if self._position_valid:
+                self._log(f"✅ Position updated: X{self.current_position[0]:.3f} Y{self.current_position[1]:.3f} Z{self.current_position[2]:.3f}")
+
+                # Double-check with a second query if the first one seemed successful
+                try:
+                    time.sleep(0.1)
+                    confirmation_responses = self._send_and_wait("?", 2.0)
+                    self._log(f"🔍 Confirmation query responses: {confirmation_responses}")
+
+                    if self._position_valid:
+                        self._log(f"✅ Position confirmed: X{self.current_position[0]:.3f} Y{self.current_position[1]:.3f} Z{self.current_position[2]:.3f}")
+                    else:
+                        self._log("⚠️ Position lost during confirmation")
+
+                except Exception as e:
+                    self._log(f"⚠️ Confirmation query failed: {e}")
+
+            else:
+                # Log all responses for debugging
+                self._log("❌ Position not found in responses:")
+                for i, response in enumerate(responses):
+                    self._log(f"  Response {i}: '{response}' (len={len(response)})")
+
+                # Try manual parsing as fallback
+                self._manual_position_parse(responses)
+
+                # If still no position, try one more query
+                if not self._position_valid:
+                    self._log("🔄 Retrying status query...")
+                    time.sleep(0.2)
+                    retry_responses = self._send_and_wait("?", 3.0)
+                    self._log(f"📥 Retry responses: {retry_responses}")
+
+                    if not self._position_valid:
+                        self._log("❌ Still no valid position after retry")
+
+        except Exception as e:
+            self._log(f"❌ Force position update failed: {e}")
+            raise
+
+    def _manual_position_parse(self, responses: List[str]):
+        """Manual fallback position parsing"""
+        for response in responses:
+            self._log(f"🔍 Manual parsing: {response}")
+
+            if response.startswith('<') and response.endswith('>'):
+                try:
+                    # Remove < and > brackets
+                    content = response[1:-1]
+                    self._log(f"  Content: {content}")
+
+                    # Split by |
+                    parts = content.split('|')
+                    self._log(f"  Parts: {parts}")
+
+                    # Look for MPos or WPos
+                    for part in parts:
+                        self._log(f"  Checking part: {part}")
+
+                        if part.startswith('MPos:') or part.startswith('WPos:'):
+                            coords_str = part[5:]  # Remove 'MPos:' or 'WPos:'
+                            self._log(f"  Coords string: {coords_str}")
+
+                            try:
+                                coords = [float(x.strip()) for x in coords_str.split(',')]
+                                if len(coords) >= 3:
+                                    self.current_position = coords[:3]
+                                    self._position_valid = True
+                                    self._position_last_updated = time.time()
+                                    self._log(f"  ✅ Manual parse success: {self.current_position}")
+                                    return
+                            except ValueError as ve:
+                                self._log(f"  ❌ Coord parse error: {ve}")
+
+                except Exception as e:
+                    self._log(f"  ❌ Manual parse error: {e}")
+
+    def get_status(self) -> str:
+        """Get current machine status"""
+        try:
+            self._update_position()  # Status query also updates position
+            return self.current_status
+        except:
+            return "Unknown"
 
     def send_command(self, command: str, custom_timeout: Optional[float] = None) -> List[str]:
         """Send command synchronously and wait for response"""
@@ -193,92 +321,117 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
         else:
             raise ValueError(f"Not a real-time command: {command}")
 
-    def get_position(self) -> List[float]:
-        """Get current machine position - FIXED to actually read MPOS"""
-        if not self.is_connected:
-            raise Exception("GRBL not connected")
-
-        try:
-            responses = self._send_and_wait("?", 3.0)
-
-            for response in responses:
-                if response.startswith('<') and response.endswith('>'):
-                    # Parse status response: <Idle|MPos:0.000,0.000,0.000|FS:0,0>
-                    parts = response[1:-1].split('|')
-
-                    for part in parts:
-                        if part.startswith('MPos:'):
-                            coords_str = part[5:]  # Remove 'MPos:'
-                            coords = [float(x.strip()) for x in coords_str.split(',')]
-
-                            if len(coords) >= 3:
-                                # Update internal position and return
-                                self.current_position = coords[:3]
-                                return coords[:3]
-
-            # If we get here, no position was found in response
-            raise Exception("No MPos data found in GRBL status response")
-
-        except Exception as e:
-            # DON'T return [0,0,0] silently - raise the error so caller knows there's a problem
-            raise Exception(f"Failed to read machine position: {e}")
-
-    def get_status(self) -> str:
-        """Get current machine status"""
-        try:
-            self._update_position()  # Status query also updates position
-            return self.current_status
-        except:
-            return "Unknown"
-
     def home(self) -> bool:
-        """Home all axes"""
+        """Home all axes with position tracking"""
         try:
+            self._log("🏠 Starting homing sequence...")
+            old_position = self.current_position.copy()
+            self._log(f"📍 Position before homing: [{old_position[0]:.3f}, {old_position[1]:.3f}, {old_position[2]:.3f}]")
+
             responses = self.send_command("$H", 30.0)
+            self._log(f"📥 Homing responses: {responses}")
+
             success = any("ok" in response.lower() for response in responses)
+            self._log(f"✅ Homing command success: {success}")
+
             if success:
-                # Update position after homing
-                time.sleep(1)
-                self._update_position()
+                # Wait for homing to complete
+                self._log("⏳ Waiting for homing to complete...")
+                time.sleep(2)
+
+                # Force position update after homing
+                self._log("🔄 Updating position after homing...")
+                self._force_position_update()
+
+                new_position = self.current_position.copy()
+                self._log(f"📍 Position after homing: [{new_position[0]:.3f}, {new_position[1]:.3f}, {new_position[2]:.3f}]")
+
+                # Emit position changed event
+                self.emit(GRBLEvents.POSITION_CHANGED, self.current_position.copy())
+
             return success
         except Exception as e:
-            self._log(f"Homing failed: {e}")
+            self._log(f"❌ Homing failed: {e}")
             return False
 
     def move_to(self, x: float = None, y: float = None, z: float = None, feed_rate: float = None) -> bool:
-        """Move to absolute coordinates"""
+        """Move to absolute coordinates with position tracking"""
         try:
+            old_position = self.current_position.copy()
+            self._log(f"🎯 Moving to absolute position from [{old_position[0]:.3f}, {old_position[1]:.3f}, {old_position[2]:.3f}]")
+
             cmd_parts = ["G90", "G1"]  # Absolute mode, linear move
 
+            target_position = old_position.copy()
             if x is not None:
                 cmd_parts.append(f"X{x:.3f}")
+                target_position[0] = x
             if y is not None:
                 cmd_parts.append(f"Y{y:.3f}")
+                target_position[1] = y
             if z is not None:
                 cmd_parts.append(f"Z{z:.3f}")
+                target_position[2] = z
             if feed_rate is not None:
                 cmd_parts.append(f"F{feed_rate:.0f}")
 
             command = " ".join(cmd_parts)
+            self._log(f"📤 Sending move command: {command}")
+            self._log(f"🎯 Target position: [{target_position[0]:.3f}, {target_position[1]:.3f}, {target_position[2]:.3f}]")
+
             responses = self.send_command(command, 15.0)
+            self._log(f"📥 Move responses: {responses}")
+
             success = any("ok" in response.lower() for response in responses)
+            self._log(f"✅ Move command success: {success}")
 
             if success:
-                # Update position after successful move
-                time.sleep(0.1)
-                self._update_position()
+                # Wait for movement to complete
+                time.sleep(0.2)
+
+                # Force position update
+                self._log("🔄 Updating position after move...")
+                self._force_position_update()
+
+                new_position = self.current_position.copy()
+                self._log(f"📍 Position after move: [{new_position[0]:.3f}, {new_position[1]:.3f}, {new_position[2]:.3f}]")
+
+                # Validate position
+                position_error = [
+                    abs(new_position[i] - target_position[i]) for i in range(3)
+                ]
+                self._log(f"📊 Position error: [{position_error[0]:.3f}, {position_error[1]:.3f}, {position_error[2]:.3f}]")
+
+                if all(error < 0.1 for error in position_error):
+                    self._log("✅ Position updated correctly after move")
+                else:
+                    self._log("⚠️ Position doesn't match target")
+
+                # Emit position changed event
+                self.emit(GRBLEvents.POSITION_CHANGED, self.current_position.copy())
 
             return success
 
         except Exception as e:
-            self._log(f"Move failed: {e}")
+            self._log(f"❌ Move failed: {e}")
             return False
 
     def jog_relative(self, x: float = 0, y: float = 0, z: float = 0, feed_rate: float = 1000) -> bool:
-        """NEW: Simple relative jogging method"""
+        """Simple relative jogging method with position tracking"""
         try:
             if x == 0 and y == 0 and z == 0:
                 return True  # No movement needed
+
+            # Store expected new position for validation
+            old_position = self.current_position.copy()
+            expected_position = [
+                old_position[0] + x,
+                old_position[1] + y,
+                old_position[2] + z
+            ]
+
+            self._log(f"🎯 Jogging: {x:+.3f}, {y:+.3f}, {z:+.3f} from [{old_position[0]:.3f}, {old_position[1]:.3f}, {old_position[2]:.3f}]")
+            self._log(f"🎯 Expected new position: [{expected_position[0]:.3f}, {expected_position[1]:.3f}, {expected_position[2]:.3f}]")
 
             # Build relative move command
             cmd_parts = ["G91", "G1"]  # Relative mode, linear move
@@ -292,22 +445,59 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
             cmd_parts.append(f"F{feed_rate:.0f}")
 
             relative_command = " ".join(cmd_parts)
+            self._log(f"📤 Sending jog command: {relative_command}")
 
             # Send the relative move command
             responses = self.send_command(relative_command, 10.0)
+            self._log(f"📥 Jog responses: {responses}")
 
             # Return to absolute mode
             try:
-                self.send_command("G90", 2.0)
-            except:
-                pass  # Continue even if this fails
+                abs_responses = self.send_command("G90", 2.0)
+                self._log(f"📥 Absolute mode responses: {abs_responses}")
+            except Exception as e:
+                self._log(f"⚠️ Failed to return to absolute mode: {e}")
 
             success = any("ok" in response.lower() for response in responses)
+            self._log(f"✅ Jog command success: {success}")
 
             if success:
-                # Update position after successful jog
-                time.sleep(0.1)
-                self._update_position()
+                # Wait a moment for movement to complete
+                time.sleep(0.2)
+
+                # Force position update with validation
+                self._log("🔄 Updating position after jog...")
+                old_pos_before_update = self.current_position.copy()
+
+                self._force_position_update()
+
+                new_position = self.current_position.copy()
+                self._log(f"📍 Position after jog: [{new_position[0]:.3f}, {new_position[1]:.3f}, {new_position[2]:.3f}]")
+
+                # Validate position change
+                position_delta = [
+                    new_position[0] - old_position[0],
+                    new_position[1] - old_position[1],
+                    new_position[2] - old_position[2]
+                ]
+
+                expected_delta = [x, y, z]
+                delta_error = [
+                    abs(position_delta[i] - expected_delta[i]) for i in range(3)
+                ]
+
+                self._log(f"📊 Expected delta: [{expected_delta[0]:+.3f}, {expected_delta[1]:+.3f}, {expected_delta[2]:+.3f}]")
+                self._log(f"📊 Actual delta: [{position_delta[0]:+.3f}, {position_delta[1]:+.3f}, {position_delta[2]:+.3f}]")
+                self._log(f"📊 Delta error: [{delta_error[0]:.3f}, {delta_error[1]:.3f}, {delta_error[2]:.3f}]")
+
+                # Check if position updated as expected (within 0.1mm tolerance)
+                if all(error < 0.1 for error in delta_error):
+                    self._log("✅ Position updated correctly after jog")
+                else:
+                    self._log("⚠️ Position delta doesn't match expected movement")
+
+                # Emit position changed event
+                self.emit(GRBLEvents.POSITION_CHANGED, self.current_position.copy())
 
             return success
 
@@ -317,13 +507,13 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
                 self.send_command("G90", 1.0)
             except:
                 pass
-            self._log(f"Jog relative failed: {e}")
+            self._log(f"❌ Jog relative failed: {e}")
             return False
 
     def move_relative(self, x: float = 0, y: float = 0, z: float = 0, feed_rate: float = None) -> List[str]:
-        """Move relative to current position - SIMPLIFIED"""
+        """Move relative to current position"""
         try:
-            # Use the new jog_relative method
+            # Use the jog_relative method
             success = self.jog_relative(x, y, z, feed_rate or 1000)
             if success:
                 return ["ok"]
@@ -368,11 +558,14 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
                     future.cancel()
             self._active_futures.clear()
 
+            # Reset position tracking
+            self._position_valid = False
+
             # Test communication after reset
             time.sleep(1)
             success = self._test_communication()
             if success:
-                self._update_position()
+                self._force_position_update()
             return success
         except Exception as e:
             self._log(f"Reset failed: {e}")
@@ -409,6 +602,8 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
             'initialization_complete': self._initialization_complete,
             'current_status': self.current_status,
             'current_position': self.current_position.copy(),
+            'position_valid': self._position_valid,
+            'position_last_updated': self._position_last_updated,
             'serial_port': self.serial_connection.port if self.serial_connection else None,
             'baudrate': self.serial_connection.baudrate if self.serial_connection else None,
             'buffer_status': self.get_buffer_status(),
@@ -493,6 +688,12 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
     def _update_position(self):
         """Update current position by querying GRBL"""
         try:
+            # Check if position is recent enough
+            current_time = time.time()
+            if (self._position_valid and
+                (current_time - self._position_last_updated) < 1.0):
+                return  # Position is recent enough
+
             responses = self._send_and_wait("?", 2.0)
             # Position will be updated by _process_response during the query
         except Exception as e:
@@ -563,9 +764,12 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
             self._parse_status(response)
 
     def _parse_status(self, response: str):
-        """Parse status response"""
+        """Parse status response - FIXED with better logging"""
         try:
+            self._log(f"🔍 Parsing status: {response}")
+
             parts = response[1:-1].split('|')
+            self._log(f"🔍 Status parts: {parts}")
 
             # Update status
             old_status = self.current_status
@@ -574,21 +778,36 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
             if old_status != self.current_status:
                 self.emit(GRBLEvents.STATUS_CHANGED, self.current_status)
 
-            # Update position
+            # Update position - look for both MPos and WPos
             for part in parts:
-                if part.startswith('MPos:'):
-                    coords = part[5:].split(',')
-                    old_position = self.current_position.copy()
-                    self.current_position = [float(x) for x in coords]
+                self._log(f"🔍 Checking part: {part}")
 
-                    # Check for significant position change
-                    if any(abs(old - new) > 0.001 for old, new in zip(old_position, self.current_position)):
-                        if self._log_position_updates:
-                            self.emit(GRBLEvents.POSITION_CHANGED, self.current_position.copy())
+                if part.startswith('MPos:') or part.startswith('WPos:'):
+                    coords_str = part[5:]  # Remove 'MPos:' or 'WPos:'
+                    self._log(f"🔍 Found position string: {coords_str}")
+
+                    try:
+                        coords = [float(x.strip()) for x in coords_str.split(',')]
+                        if len(coords) >= 3:
+                            old_position = self.current_position.copy()
+                            self.current_position = coords[:3]
+                            self._position_valid = True
+                            self._position_last_updated = time.time()
+
+                            self._log(f"✅ Position parsed: {self.current_position}")
+
+                            # Check for significant position change
+                            if any(abs(old - new) > 0.001 for old, new in zip(old_position, self.current_position)):
+                                if self._log_position_updates:
+                                    self.emit(GRBLEvents.POSITION_CHANGED, self.current_position.copy())
+                        else:
+                            self._log(f"❌ Not enough coordinates: {len(coords)}")
+                    except ValueError as ve:
+                        self._log(f"❌ Failed to parse coordinates: {ve}")
                     break
 
         except Exception as e:
-            self._log(f"Status parse error: {e}")
+            self._log(f"❌ Status parse error: {e}")
 
     def _clear_startup_messages(self):
         """Clear GRBL startup messages"""
@@ -650,6 +869,44 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
     def _on_error(self, error_message: str):
         """Handle error events"""
         pass
+
+    def debug_position_status(self):
+        """Debug method to check current position status"""
+        try:
+            self._log("🔍 === POSITION DEBUG STATUS ===")
+            self._log(f"Connected: {self._is_connected}")
+            self._log(f"Position valid: {self._position_valid}")
+            self._log(f"Current position: {self.current_position}")
+            self._log(f"Last updated: {getattr(self, '_position_last_updated', 'Never')}")
+
+            if self._is_connected:
+                current_time = time.time()
+                age = current_time - getattr(self, '_position_last_updated', 0)
+                self._log(f"Position age: {age:.2f} seconds")
+
+                # Try a fresh status query
+                self._log("🔄 Sending fresh status query for debug...")
+                try:
+                    responses = self._send_and_wait("?", 3.0)
+                    self._log(f"📥 Fresh responses: {responses}")
+
+                    for response in responses:
+                        if response.startswith('<') and response.endswith('>'):
+                            self._log(f"🔍 Detailed status parsing for: {response}")
+                            content = response[1:-1]
+                            parts = content.split('|')
+                            for i, part in enumerate(parts):
+                                self._log(f"  Part {i}: '{part}'")
+                                if 'Pos:' in part:
+                                    self._log(f"    >>> POSITION PART: '{part}'")
+
+                except Exception as e:
+                    self._log(f"❌ Debug query failed: {e}")
+
+            self._log("🔍 === END POSITION DEBUG ===")
+
+        except Exception as e:
+            self._log(f"❌ Debug position status failed: {e}")
 
     def is_connected(self) -> bool:
         return self._is_connected
