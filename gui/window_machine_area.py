@@ -90,7 +90,7 @@ class MachineAreaWindow:
 
                 # Log the bounds for debugging
                 origin_name = self.hardware_service.get_machine_origin_name()
-                homing = self.hardware_service.get_homing_coordinates()
+                homing = self.hardware_service.get_homing_position()
 
                 self.log(f"BOUNDS UPDATE: Origin={origin_name}, Bounds=X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
 
@@ -406,7 +406,7 @@ class MachineAreaWindow:
 
         if self.hardware_service:
             origin = self.hardware_service.get_machine_origin_name()
-            homing = self.hardware_service.get_homing_coordinates()
+            homing = self.hardware_service.get_homing_position()
             debug_info.append(f"Origin: {origin} → Home({homing['x']:.0f},{homing['y']:.0f})")
 
         self.log(f"DEBUG: {'; '.join(debug_info)}", "info")
@@ -715,7 +715,7 @@ class MachineAreaWindow:
             status['hardware_info'] = {
                 'origin': self.hardware_service.get_machine_origin_name(),
                 'machine_size': self.hardware_service.get_machine_size(),
-                'homing_coordinates': self.hardware_service.get_homing_coordinates()
+                'homing_coordinates': self.hardware_service.get_homing_position()
             }
 
         if self.canvas_component:

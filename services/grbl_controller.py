@@ -31,6 +31,7 @@ class GRBLEvents:
     # Status events
     STATUS_CHANGED = "grbl.status_changed"
     POSITION_CHANGED = "grbl.position_changed"
+    HOMING_POSITION = "grbl.homing_position"
 
     # Error events
     ERROR = "grbl.error"
@@ -322,36 +323,35 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
             raise ValueError(f"Not a real-time command: {command}")
 
     def home(self) -> bool:
-        """Home all axes with position tracking"""
+        """Home all axes"""
         try:
-            self._log("🏠 Starting homing sequence...")
-            old_position = self.current_position.copy()
-            self._log(f"📍 Position before homing: [{old_position[0]:.3f}, {old_position[1]:.3f}, {old_position[2]:.3f}]")
-
             responses = self.send_command("$H", 30.0)
-            self._log(f"📥 Homing responses: {responses}")
-
             success = any("ok" in response.lower() for response in responses)
-            self._log(f"✅ Homing command success: {success}")
-
             if success:
-                # Wait for homing to complete
-                self._log("⏳ Waiting for homing to complete...")
-                time.sleep(2)
+                # Update position after homing
+                time.sleep(1)
+                self._update_position()
 
-                # Force position update after homing
-                self._log("🔄 Updating position after homing...")
-                self._force_position_update()
-
-                new_position = self.current_position.copy()
-                self._log(f"📍 Position after homing: [{new_position[0]:.3f}, {new_position[1]:.3f}, {new_position[2]:.3f}]")
-
-                # Emit position changed event
-                self.emit(GRBLEvents.POSITION_CHANGED, self.current_position.copy())
+                # NEW: Emit homing position event
+                self.emit(GRBLEvents.POSITION_CHANGED,self.current_position.copy())
+                self.emit(GRBLEvents.HOMING_POSITION, {
+                    'position': self.current_position.copy(),
+                    'success': True,
+                    'timestamp': time.time()
+                })
 
             return success
         except Exception as e:
-            self._log(f"❌ Homing failed: {e}")
+            self._log(f"Homing failed: {e}")
+
+            # NEW: Emit homing failed event
+            self.emit(GRBLEvents.HOMING_POSITION, {
+                'position': None,
+                'success': False,
+                'error': str(e),
+                'timestamp': time.time()
+            })
+
             return False
 
     def move_to(self, x: float = None, y: float = None, z: float = None, feed_rate: float = None) -> bool:
