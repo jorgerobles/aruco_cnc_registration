@@ -14,7 +14,7 @@ from services.overlays.overlay_interface import FrameOverlay
 class MarkerDetectionOverlay(FrameOverlay):
     """Overlay component for ArUco marker detection and pose visualization"""
 
-    def __init__(self, camera_manager, marker_length: float = 20.0,
+    def __init__(self, camera_manager, marker_length: float = 15.0,
                  dictionary=cv2.aruco.DICT_4X4_50, logger: Optional[Callable] = None):
         self.camera_manager = camera_manager
         self.marker_length = marker_length

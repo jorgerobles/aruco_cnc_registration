@@ -335,7 +335,7 @@ def debug_camera_manager():
         # Test marker detection
         if hasattr(camera_manager, 'detect_marker_pose') and frame is not None:
             print("Testing marker detection...")
-            result = camera_manager.detect_marker_pose(frame, 20.0)
+            result = camera_manager.detect_marker_pose(frame, 15.0)
             print(f"Marker detection result: {type(result)}")
 
         # Cleanup
