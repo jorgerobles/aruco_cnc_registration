@@ -337,7 +337,7 @@ class RegistrationGUI:
         self.connection_panel = MachinePanel(scrollable_frame, self.grbl_controller)
 
         # CameraPanel handles all camera functionality
-        self.calibration_panel = CameraPanel(scrollable_frame, self.camera_manager, self.log)
+        self.calibration_panel = CameraPanel(scrollable_frame, self.camera_manager, self.hardware_service, self.log)
 
         self.machine_panel = JogPanel(scrollable_frame, self.grbl_controller)
 

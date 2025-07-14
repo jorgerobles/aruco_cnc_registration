@@ -1,6 +1,6 @@
 """
 Enhanced Camera Panel with integrated FOV calculation using Camera Manager
-Complete integration with Camera Manager FOV capabilities
+Simplified version - FOV tab removed, Auto FOV button kept on camera tab
 """
 
 import threading
@@ -36,11 +36,10 @@ class CameraPanel:
         self.offset_y_var = tk.DoubleVar(value=0.0)
         self.offset_z_var = tk.DoubleVar(value=0.0)
 
-        # NEW: FOV status variables
+        # FOV status variables (simplified)
         self.fov_status_var = tk.StringVar(value="No FOV data")
-        self.fov_info_var = tk.StringVar(value="Calculate FOV for precise positioning")
 
-        # Setup UI with new FOV integration
+        # Setup UI with simplified structure
         self._setup_widgets()
         self._set_calibration_controls_enabled(False)
 
@@ -58,12 +57,12 @@ class CameraPanel:
             print(f"[{level.upper()}] CameraPanel: {message}")
 
     def _setup_widgets(self):
-        """Setup UI with tabbed interface including FOV integration"""
-        # Create notebook for tabs
+        """Setup UI with simplified tabbed interface"""
+        # Create notebook for tabs (Camera and Offset only)
         notebook = ttk.Notebook(self.frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # Tab 1: Camera Connection & Calibration
+        # Tab 1: Camera Connection & Calibration (with FOV button)
         camera_tab = ttk.Frame(notebook)
         notebook.add(camera_tab, text="Camera")
         self._setup_camera_tab(camera_tab)
@@ -73,13 +72,8 @@ class CameraPanel:
         notebook.add(offset_tab, text="Offset")
         self._setup_offset_tab(offset_tab)
 
-        # Tab 3: NEW - FOV & Precision
-        fov_tab = ttk.Frame(notebook)
-        notebook.add(fov_tab, text="FOV & Precision")
-        self._setup_fov_tab(fov_tab)
-
     def _setup_camera_tab(self, parent):
-        """Setup camera connection and calibration tab"""
+        """Setup camera connection and calibration tab with FOV integration"""
         # Camera Connection Section
         conn_frame = ttk.LabelFrame(parent, text="Camera Connection")
         conn_frame.pack(fill=tk.X, pady=5, padx=5)
@@ -123,7 +117,7 @@ class CameraPanel:
         self.marker_length_entry.pack(side=tk.LEFT, padx=(2, 0))
         ttk.Label(marker_row, text="mm").pack(side=tk.LEFT, padx=(1, 5))
 
-        # NEW: FOV calculation button integrated here
+        # Auto FOV calculation button (kept here as requested)
         ttk.Button(marker_row, text="Auto FOV", command=self.calculate_fov_auto, width=8).pack(side=tk.LEFT, padx=(5, 0))
 
         # Calibration status and buttons row
@@ -142,7 +136,7 @@ class CameraPanel:
                                    command=self._show_camera_info, width=6)
         self.info_btn.pack(side=tk.LEFT)
 
-        # NEW: FOV Status Display
+        # FOV Status Display (simplified, single line)
         fov_status_frame = ttk.Frame(calib_frame)
         fov_status_frame.pack(fill=tk.X, pady=2, padx=3)
 
@@ -189,62 +183,6 @@ class CameraPanel:
                                        font=("TkDefaultFont", 8), foreground="blue")
         self.offset_display.pack(pady=(10, 0))
 
-    def _setup_fov_tab(self, parent):
-        """NEW: Setup FOV and precision configuration tab"""
-        # Instructions
-        instructions = """Field of View (FOV) & Precision Setup:
-
-The camera manager can automatically calculate the field of view using ArUco markers.
-This enables precise marker positioning within the camera frame.
-
-1. Ensure camera is connected and calibrated
-2. Place an ArUco marker in the camera view
-3. Click 'Calculate FOV' to measure automatically
-4. Use 'Test Precision' to verify accuracy"""
-
-        info_label = ttk.Label(parent, text=instructions,
-                              font=("TkDefaultFont", 8), foreground="gray",
-                              justify=tk.LEFT, wraplength=250)
-        info_label.pack(pady=(10, 20), padx=10)
-
-        # FOV Calculation Section
-        fov_calc_frame = ttk.LabelFrame(parent, text="Automatic FOV Calculation")
-        fov_calc_frame.pack(fill=tk.X, pady=5, padx=10)
-
-        # Calculation controls
-        calc_controls = ttk.Frame(fov_calc_frame)
-        calc_controls.pack(fill=tk.X, pady=5)
-
-        ttk.Button(calc_controls, text="Calculate FOV", command=self.calculate_fov_auto,
-                  width=15).pack(side=tk.LEFT, padx=2)
-        ttk.Button(calc_controls, text="Average (3x)", command=self.calculate_fov_averaged,
-                  width=15).pack(side=tk.LEFT, padx=2)
-        ttk.Button(calc_controls, text="Clear FOV", command=self.clear_fov_data,
-                  width=12).pack(side=tk.LEFT, padx=2)
-
-        # FOV Status Display
-        self.fov_info_label = ttk.Label(fov_calc_frame, textvariable=self.fov_info_var,
-                                       font=("TkDefaultFont", 8), foreground="blue",
-                                       wraplength=250, justify=tk.LEFT)
-        self.fov_info_label.pack(pady=5, padx=5, anchor=tk.W)
-
-        # Precision Testing Section
-        precision_frame = ttk.LabelFrame(parent, text="Precision Testing")
-        precision_frame.pack(fill=tk.X, pady=5, padx=10)
-
-        test_controls = ttk.Frame(precision_frame)
-        test_controls.pack(fill=tk.X, pady=5)
-
-        ttk.Button(test_controls, text="Test Precision", command=self.test_precision,
-                  width=15).pack(side=tk.LEFT, padx=2)
-        ttk.Button(test_controls, text="Show FOV History", command=self.show_fov_history,
-                  width=15).pack(side=tk.LEFT, padx=2)
-
-        # Precision results
-        self.precision_results = tk.Text(precision_frame, height=4, width=40,
-                                        font=("Consolas", 8), wrap=tk.WORD)
-        self.precision_results.pack(pady=5, padx=5, fill=tk.X)
-
     def _set_calibration_controls_enabled(self, enabled: bool):
         """Enable or disable calibration controls"""
         state = tk.NORMAL if enabled else tk.DISABLED
@@ -288,7 +226,6 @@ This enables precise marker positioning within the camera frame.
 
         # Clear FOV data
         self.fov_status_var.set("No FOV data")
-        self.fov_info_var.set("Camera disconnected")
 
     @event_handler(CameraEvents.CALIBRATION_LOADED, EventPriority.NORMAL)
     def on_calibration_loaded(self, file_path: str):
@@ -305,35 +242,22 @@ This enables precise marker positioning within the camera frame.
         """Handle camera error events"""
         self.log(f"Camera error: {error_message}", "error")
 
-    # NEW: FOV event handlers
+    # FOV event handlers (simplified)
     @event_handler(CameraEvents.FOV_CALCULATED, EventPriority.NORMAL)
     def on_fov_calculated(self, fov_data: dict):
         """Handle FOV calculation events"""
         width = fov_data.get('width_mm', 0)
         height = fov_data.get('height_mm', 0)
         distance = fov_data.get('distance_mm', 0)
-        pixels_per_mm = fov_data.get('pixels_per_mm', 0)
 
         self.fov_status_var.set(f"FOV: {width:.1f}×{height:.1f}mm @ {distance:.1f}mm")
-
-        info_text = f"""FOV calculated successfully!
-Size: {width:.1f} × {height:.1f} mm
-Distance: {distance:.1f} mm
-Resolution: {pixels_per_mm:.2f} px/mm
-Method: {fov_data.get('calculated_from', 'unknown')}"""
-
-        if 'num_samples' in fov_data:
-            info_text += f"\nSamples: {fov_data['num_samples']}"
-
-        self.fov_info_var.set(info_text)
-        self.log(f"FOV calculated: {width:.1f}×{height:.1f}mm")
+        self.log(f"FOV calculated: {width:.1f}×{height:.1f}mm @ {distance:.1f}mm")
 
     @event_handler(CameraEvents.FOV_UPDATED, EventPriority.NORMAL)
     def on_fov_updated(self, fov_data):
         """Handle FOV data updates"""
         if fov_data is None:
             self.fov_status_var.set("FOV data cleared")
-            self.fov_info_var.set("Calculate FOV for precise positioning")
 
     # === CAMERA CONNECTION METHODS ===
 
@@ -518,7 +442,7 @@ Field of View:
         self.offset_z_var.set(0.0)
         self.apply_offset()
 
-    # === NEW: FOV CALCULATION METHODS ===
+    # === FOV CALCULATION METHODS (simplified) ===
 
     def calculate_fov_auto(self):
         """Calculate FOV automatically using camera manager"""
@@ -555,152 +479,6 @@ The camera manager will now use this FOV data for precise marker positioning."""
         except Exception as e:
             self.log(f"FOV calculation error: {e}", "error")
             messagebox.showerror("Error", f"FOV calculation failed: {e}")
-
-    def calculate_fov_averaged(self):
-        """Calculate FOV with averaging for better accuracy"""
-        try:
-            if not self.camera_manager.is_connected:
-                messagebox.showerror("Error", "Camera not connected")
-                return
-
-            if not self.camera_manager.is_calibrated():
-                messagebox.showerror("Error", "Camera not calibrated - load calibration first")
-                return
-
-            # Show progress
-            self.fov_info_var.set("Calculating averaged FOV... (3 samples)")
-            self.frame.update()
-
-            # Calculate averaged FOV
-            fov_data = self.camera_manager.get_averaged_fov(num_samples=3)
-
-            if fov_data is None:
-                messagebox.showerror("Error", "No ArUco marker detected consistently.\nEnsure marker is visible and stable.")
-                return
-
-            # Show results with standard deviation
-            std_dev = fov_data.get('std_dev', {})
-            info_text = f"""Averaged FOV Calculated!
-
-Field of View: {fov_data['width_mm']:.1f} × {fov_data['height_mm']:.1f} mm
-Distance: {fov_data['distance_mm']:.1f} mm
-Pixels per mm: {fov_data['pixels_per_mm']:.2f}
-Samples: {fov_data['num_samples']}
-
-Standard Deviation:
-  Width: ±{std_dev.get('width_mm', 0):.2f} mm
-  Height: ±{std_dev.get('height_mm', 0):.2f} mm
-
-This averaged calculation provides better accuracy for precise positioning."""
-
-            messagebox.showinfo("Averaged FOV Complete", info_text)
-
-        except Exception as e:
-            self.log(f"Averaged FOV calculation error: {e}", "error")
-            messagebox.showerror("Error", f"Averaged FOV calculation failed: {e}")
-
-    def clear_fov_data(self):
-        """Clear FOV calculation data"""
-        try:
-            self.camera_manager.clear_fov_data()
-            self.log("FOV data cleared")
-        except Exception as e:
-            self.log(f"Error clearing FOV data: {e}", "error")
-
-    def test_precision(self):
-        """Test positioning precision with current FOV"""
-        try:
-            if not self.camera_manager.is_connected:
-                self.precision_results.delete(1.0, tk.END)
-                self.precision_results.insert(tk.END, "Camera not connected")
-                return
-
-            fov_data = self.camera_manager.get_current_fov()
-            if fov_data is None:
-                self.precision_results.delete(1.0, tk.END)
-                self.precision_results.insert(tk.END, "No FOV data - calculate FOV first")
-                return
-
-            # Test precision by checking current marker detection
-            marker_size_mm = self.marker_length_var.get()
-            current_fov = self.camera_manager.calculate_fov_from_current_frame(marker_size_mm)
-
-            if current_fov is None:
-                self.precision_results.delete(1.0, tk.END)
-                self.precision_results.insert(tk.END, "No marker detected for precision test")
-                return
-
-            # Compare with stored FOV
-            width_diff = abs(current_fov['width_mm'] - fov_data['width_mm'])
-            height_diff = abs(current_fov['height_mm'] - fov_data['height_mm'])
-            distance_diff = abs(current_fov['distance_mm'] - fov_data['distance_mm'])
-
-            results = f"""Precision Test Results:
-
-Stored FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm
-Current FOV: {current_fov['width_mm']:.1f}×{current_fov['height_mm']:.1f}mm
-
-Differences:
-Width: ±{width_diff:.2f}mm
-Height: ±{height_diff:.2f}mm  
-Distance: ±{distance_diff:.1f}mm
-
-Precision: {'GOOD' if width_diff < 2.0 and height_diff < 2.0 else 'NEEDS IMPROVEMENT'}"""
-
-            self.precision_results.delete(1.0, tk.END)
-            self.precision_results.insert(tk.END, results)
-
-        except Exception as e:
-            self.precision_results.delete(1.0, tk.END)
-            self.precision_results.insert(tk.END, f"Precision test error: {e}")
-            self.log(f"Precision test error: {e}", "error")
-
-    def show_fov_history(self):
-        """Show FOV calculation history"""
-        try:
-            history = self.camera_manager.get_fov_history()
-
-            if not history:
-                messagebox.showinfo("FOV History", "No FOV calculations in history")
-                return
-
-            # Create history window
-            history_window = tk.Toplevel(self.frame)
-            history_window.title("FOV Calculation History")
-            history_window.geometry("500x400")
-
-            # History text display
-            history_text = tk.Text(history_window, wrap=tk.WORD, font=("Consolas", 9))
-            scrollbar = ttk.Scrollbar(history_window, orient="vertical", command=history_text.yview)
-            history_text.configure(yscrollcommand=scrollbar.set)
-
-            history_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-            # Format history
-            history_content = "FOV Calculation History:\n" + "="*50 + "\n\n"
-
-            for i, fov in enumerate(reversed(history)):  # Most recent first
-                import time
-                timestamp = time.strftime("%H:%M:%S", time.localtime(fov.get('timestamp', 0)))
-
-                history_content += f"#{len(history)-i} - {timestamp}\n"
-                history_content += f"Size: {fov['width_mm']:.1f}×{fov['height_mm']:.1f}mm\n"
-                history_content += f"Distance: {fov['distance_mm']:.1f}mm\n"
-                history_content += f"Resolution: {fov['pixels_per_mm']:.2f}px/mm\n"
-                history_content += f"Method: {fov.get('calculated_from', 'unknown')}\n"
-
-                if 'num_samples' in fov:
-                    history_content += f"Samples: {fov['num_samples']}\n"
-
-                history_content += "-"*30 + "\n\n"
-
-            history_text.insert(tk.END, history_content)
-            history_text.config(state=tk.DISABLED)
-
-        except Exception as e:
-            self.log(f"Error showing FOV history: {e}", "error")
-            messagebox.showerror("Error", f"Failed to show FOV history: {e}")
 
     # === UTILITY METHODS ===
 
@@ -774,18 +552,9 @@ Precision: {'GOOD' if width_diff < 2.0 and height_diff < 2.0 else 'NEEDS IMPROVE
             fov_data = self.camera_manager.get_current_fov()
 
             if fov_data:
-                self.fov_status_var.set(f"FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm")
-
-                info_text = f"""Current FOV data:
-Size: {fov_data['width_mm']:.1f} × {fov_data['height_mm']:.1f} mm
-Distance: {fov_data['distance_mm']:.1f} mm
-Resolution: {fov_data['pixels_per_mm']:.2f} px/mm
-Method: {fov_data.get('calculated_from', 'unknown')}"""
-
-                self.fov_info_var.set(info_text)
+                self.fov_status_var.set(f"FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm @ {fov_data['distance_mm']:.1f}mm")
             else:
                 self.fov_status_var.set("No FOV data")
-                self.fov_info_var.set("Calculate FOV for precise positioning")
 
         except Exception as e:
             self.log(f"Error refreshing FOV display: {e}", "error")

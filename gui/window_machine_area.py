@@ -1,7 +1,7 @@
 """
-Updated Machine Area Window
-Now properly uses calculated bounds from hardware service and origin configuration
-Supports negative coordinate systems like (-450,-450) to (0,0)
+Updated Machine Area Window with FOV Integration
+Now uses only camera manager data for FOV - no manual controls
+Supports negative coordinate systems and proper bounds from hardware service
 """
 
 import threading
@@ -23,7 +23,7 @@ from services.registration_manager import RegistrationEvents
 
 @event_aware()
 class MachineAreaWindow:
-    """Machine area visualization window with hardware service bounds integration"""
+    """Machine area visualization window with FOV integration and hardware service bounds"""
 
     def __init__(self, parent_window, grbl_controller, registration_manager, routes_service,
                  hardware_service, camera_manager, logger: Optional[Callable] = None):
@@ -56,22 +56,20 @@ class MachineAreaWindow:
         self.calibration_points = []
         self.actual_routes = []
 
-        # Camera frame parameters
-        self.camera_height_mm = 100.0
-        self.pixels_per_mm = 5.0
+        # Camera resolution (for fallback calculations if no FOV data available)
         self.camera_resolution = (640, 480)
 
         # Route colors
         self.route_colors = ['#f5a623', '#7ed321', '#d0021b', '#9013fe', '#50e3c2']
 
         # Initialize machine bounds from hardware service
-        self.machine_bounds = {}  # Initialize empty first
+        self.machine_bounds = {}
         self._update_machine_bounds_from_hardware()
 
         # Update rate
         self.update_rate_ms = 500
 
-        self.log("Machine Area Window initialized with hardware service bounds")
+        self.log("Machine Area Window initialized with camera manager FOV integration")
 
     def log(self, message: str, level: str = "info"):
         """Log message if logger is available"""
@@ -82,25 +80,18 @@ class MachineAreaWindow:
         """Update machine bounds from hardware service"""
         try:
             if self.hardware_service:
-                # Get calculated bounds from hardware service
                 bounds = self.hardware_service.get_machine_bounds()
+                self.machine_bounds = bounds.copy()
 
-                # FORCE update machine bounds - don't use defaults
-                self.machine_bounds = bounds.copy()  # Use the exact bounds from hardware service
-
-                # Log the bounds for debugging
                 origin_name = self.hardware_service.get_machine_origin_name()
-                homing = self.hardware_service.get_homing_position()
-
                 self.log(f"BOUNDS UPDATE: Origin={origin_name}, Bounds=X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
 
-                # IMMEDIATELY update canvas if it exists
+                # Update canvas if it exists
                 if self.canvas_component:
                     self.canvas_component.set_machine_bounds(
                         bounds['x_min'], bounds['y_min'],
                         bounds['x_max'], bounds['y_max']
                     )
-                    self.log(f"Canvas bounds updated to: X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
 
                 # Update controls if they exist
                 if self.controls_component:
@@ -108,8 +99,7 @@ class MachineAreaWindow:
                     self.controls_component.set_machine_bounds(size['x'], size['y'])
 
             else:
-                self.log("ERROR: No hardware service - cannot get bounds", "error")
-                # Only use fallback if no hardware service
+                self.log("ERROR: No hardware service - using fallback bounds", "error")
                 self.machine_bounds = {
                     'x_min': 0.0, 'x_max': 450.0,
                     'y_min': 0.0, 'y_max': 450.0,
@@ -118,7 +108,6 @@ class MachineAreaWindow:
 
         except Exception as e:
             self.log(f"ERROR updating machine bounds: {e}", "error")
-            # Only use safe defaults on error
             self.machine_bounds = {
                 'x_min': 0.0, 'x_max': 450.0,
                 'y_min': 0.0, 'y_max': 450.0,
@@ -148,6 +137,23 @@ class MachineAreaWindow:
     def _on_camera_calibration_loaded(self, file_path: str):
         """Handle camera calibration loaded"""
         self.update_camera_info()
+        if self.is_visible and self.auto_update:
+            self.schedule_update()
+
+    @event_handler(CameraEvents.FOV_CALCULATED, EventPriority.NORMAL)
+    def _on_fov_calculated(self, fov_data: dict):
+        """Handle FOV calculation events"""
+        self.log(f"FOV data received: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm")
+        self.update_camera_frame_bounds()
+        self._update_camera_status_in_controls()
+        if self.is_visible and self.auto_update:
+            self.schedule_update()
+
+    @event_handler(CameraEvents.FOV_UPDATED, EventPriority.NORMAL)
+    def _on_fov_updated(self, fov_data):
+        """Handle FOV data updates"""
+        self.update_camera_frame_bounds()
+        self._update_camera_status_in_controls()
         if self.is_visible and self.auto_update:
             self.schedule_update()
 
@@ -194,7 +200,7 @@ class MachineAreaWindow:
 
     @event_handler(HardwareEvents.MACHINE_SIZE_UPDATED, EventPriority.HIGH)
     def _on_machine_size_updated(self, data: dict):
-        """Handle machine size updates - recalculate bounds"""
+        """Handle machine size updates"""
         self.log(f"Machine size updated: {data['x']}×{data['y']}×{data['z']}mm")
         self._update_machine_bounds_from_hardware()
         if self.is_visible:
@@ -202,7 +208,7 @@ class MachineAreaWindow:
 
     @event_handler(HardwareEvents.MACHINE_ORIGIN_UPDATED, EventPriority.HIGH)
     def _on_machine_origin_updated(self, data: dict):
-        """Handle machine origin updates - recalculate bounds"""
+        """Handle machine origin updates"""
         self.log(f"Machine origin updated: {data['origin_name']}")
         self._update_machine_bounds_from_hardware()
         if self.is_visible:
@@ -232,7 +238,7 @@ class MachineAreaWindow:
             self.log("Machine area visualization window closed")
 
     def create_window(self):
-        """Create the visualization window with separated components"""
+        """Create the visualization window"""
         try:
             self.window = tk.Toplevel(self.parent_window)
             self.window.title("Machine Area Visualization")
@@ -250,7 +256,7 @@ class MachineAreaWindow:
             self.window = None
 
     def setup_window_layout(self):
-        """Setup window layout with separated components"""
+        """Setup window layout"""
         main_frame = ttk.Frame(self.window)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -258,16 +264,15 @@ class MachineAreaWindow:
         canvas_frame = ttk.LabelFrame(main_frame, text="Machine Area View")
         canvas_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        # Create canvas component with current machine bounds
+        # Create canvas component
         self.canvas_component = MachineAreaCanvas(canvas_frame, logger=self.log)
 
-        # FORCE set the bounds from hardware service
+        # Set bounds from hardware service
         if self.machine_bounds:
             self.canvas_component.set_machine_bounds(
                 self.machine_bounds['x_min'], self.machine_bounds['y_min'],
                 self.machine_bounds['x_max'], self.machine_bounds['y_max']
             )
-            self.log(f"CANVAS SETUP: Set bounds to X({self.machine_bounds['x_min']:.0f},{self.machine_bounds['x_max']:.0f}) Y({self.machine_bounds['y_min']:.0f},{self.machine_bounds['y_max']:.0f})")
 
         # Controls frame (right side)
         controls_frame = ttk.LabelFrame(main_frame, text="Display Options")
@@ -276,14 +281,16 @@ class MachineAreaWindow:
         # Create controls component
         self.controls_component = MachineAreaControls(controls_frame, self.log)
 
-        # Set initial values in controls from hardware service
+        # Set initial values from hardware service
         if self.hardware_service:
             try:
                 size = self.hardware_service.get_machine_size()
                 self.controls_component.set_machine_bounds(size['x'], size['y'])
-                self.controls_component.set_camera_config(self.camera_height_mm, self.pixels_per_mm)
             except Exception as e:
                 self.log(f"Error setting initial control values: {e}", "error")
+
+        # Update camera status in controls
+        self._update_camera_status_in_controls()
 
         # Status frame (bottom)
         status_frame = ttk.Frame(self.window)
@@ -302,12 +309,12 @@ class MachineAreaWindow:
             'zoom_out': self.canvas_component.zoom_out,
             'reset_view': self.canvas_component.reset_view,
             'zoom_to_fit': self.canvas_component.zoom_to_fit,
-            'camera_config_changed': self.on_camera_config_changed,
             'bounds_changed': self.on_bounds_changed_from_controls,
             'auto_update_changed': self.on_auto_update_changed,
             'manual_update': self.manual_update,
             'center_view': self.center_view,
             'update_camera_info': self.update_camera_info,
+            'calculate_fov': self.calculate_fov,  # NEW: FOV calculation callback
             'debug_show_data': self.debug_show_data
         }
 
@@ -327,30 +334,16 @@ class MachineAreaWindow:
         """Handle display option changes"""
         self.schedule_update()
 
-    def on_camera_config_changed(self, config: dict):
-        """Handle camera configuration changes"""
-        try:
-            self.camera_height_mm = config['height_mm']
-            self.pixels_per_mm = config['pixels_per_mm']
-            self.update_camera_frame_bounds()
-            self.schedule_update()
-            self.log(f"Camera config updated: Height={self.camera_height_mm}mm, Scale={self.pixels_per_mm}px/mm")
-        except Exception as e:
-            self.log(f"Error updating camera config: {e}", "error")
-
     def on_bounds_changed_from_controls(self, bounds: dict):
         """Handle machine bounds changes from controls panel"""
         try:
-            # Update hardware service with new machine size
             if self.hardware_service:
                 x_max = bounds['x_max']
                 y_max = bounds['y_max']
-                z_max = self.hardware_service.get_machine_size()['z']  # Keep current Z
+                z_max = self.hardware_service.get_machine_size()['z']
 
                 self.hardware_service.set_machine_size(x_max, y_max, z_max)
                 self.log(f"Machine size updated from controls: {x_max}×{y_max}×{z_max}mm")
-
-                # Bounds will be automatically updated via hardware service event
             else:
                 # Fallback: update bounds directly
                 self.machine_bounds['x_max'] = bounds['x_max']
@@ -360,8 +353,6 @@ class MachineAreaWindow:
                     self.machine_bounds['x_min'], self.machine_bounds['y_min'],
                     self.machine_bounds['x_max'], self.machine_bounds['y_max']
                 )
-
-                self.log(f"Machine bounds updated directly: X={bounds['x_max']}, Y={bounds['y_max']}")
 
         except Exception as e:
             self.log(f"Error updating bounds from controls: {e}", "error")
@@ -387,8 +378,35 @@ class MachineAreaWindow:
         if self.canvas_component:
             self.canvas_component.reset_view()
 
+    def calculate_fov(self):
+        """Trigger FOV calculation via camera manager"""
+        if not self.camera_manager:
+            self.log("No camera manager available for FOV calculation", "warning")
+            return
+
+        try:
+            if not self.camera_manager.is_connected:
+                self.log("Camera not connected - cannot calculate FOV", "warning")
+                return
+
+            if not self.camera_manager.is_calibrated():
+                self.log("Camera not calibrated - cannot calculate FOV", "warning")
+                return
+
+            # Trigger FOV calculation with default marker size (should be configurable)
+            marker_size_mm = 20.0  # This should ideally come from settings
+            fov_data = self.camera_manager.calculate_fov_from_current_frame(marker_size_mm)
+
+            if fov_data:
+                self.log(f"FOV calculated: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm")
+            else:
+                self.log("FOV calculation failed - no ArUco marker detected", "warning")
+
+        except Exception as e:
+            self.log(f"Error triggering FOV calculation: {e}", "error")
+
     def debug_show_data(self):
-        """Debug show data"""
+        """Debug show data including FOV information"""
         if not self.controls_component.is_debug_enabled():
             return
 
@@ -398,6 +416,14 @@ class MachineAreaWindow:
             f"Routes bounds: {self.routes_bounds}",
             f"Machine bounds: X({self.machine_bounds['x_min']:.0f},{self.machine_bounds['x_max']:.0f}) Y({self.machine_bounds['y_min']:.0f},{self.machine_bounds['y_max']:.0f})"
         ]
+
+        # Add FOV debug info from camera manager
+        if self.camera_manager:
+            fov_data = self.camera_manager.get_current_fov()
+            if fov_data:
+                debug_info.append(f"FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm @ {fov_data['distance_mm']:.1f}mm [Source: {fov_data.get('calculated_from', 'unknown')}]")
+            else:
+                debug_info.append("FOV: No data from camera manager")
 
         if self.canvas_component:
             view_info = self.canvas_component.get_view_info()
@@ -502,7 +528,7 @@ class MachineAreaWindow:
             self.camera_frame_bounds = None
 
     def update_camera_bounds(self):
-        """Update camera field of view bounds"""
+        """Update camera field of view bounds (legacy - for compatibility)"""
         if not self.current_camera_position:
             self.camera_view_bounds = None
             return
@@ -522,26 +548,77 @@ class MachineAreaWindow:
             self.camera_view_bounds = None
 
     def update_camera_frame_bounds(self):
-        """Update camera frame bounds based on resolution and scale"""
+        """Update camera frame bounds using FOV data from camera manager only"""
         if not self.current_camera_position:
             self.camera_frame_bounds = None
             return
 
         try:
-            frame_width_mm = self.camera_resolution[0] / self.pixels_per_mm
-            frame_height_mm = self.camera_resolution[1] / self.pixels_per_mm
             cam_x, cam_y = self.current_camera_position
 
-            self.camera_frame_bounds = {
-                'x_min': cam_x - frame_width_mm / 2,
-                'x_max': cam_x + frame_width_mm / 2,
-                'y_min': cam_y - frame_height_mm / 2,
-                'y_max': cam_y + frame_height_mm / 2,
-                'width_mm': frame_width_mm,
-                'height_mm': frame_height_mm
-            }
+            # Get FOV data from camera manager only
+            fov_data = None
+            if self.camera_manager:
+                fov_data = self.camera_manager.get_current_fov()
+
+            if fov_data:
+                # Use camera manager FOV data for precise frame bounds
+                frame_width_mm = fov_data['width_mm']
+                frame_height_mm = fov_data['height_mm']
+                pixels_per_mm = fov_data['pixels_per_mm']
+
+                self.log(f"Using camera manager FOV data: {frame_width_mm:.1f}×{frame_height_mm:.1f}mm @ {pixels_per_mm:.2f}px/mm", "debug")
+
+                self.camera_frame_bounds = {
+                    'x_min': cam_x - frame_width_mm / 2,
+                    'x_max': cam_x + frame_width_mm / 2,
+                    'y_min': cam_y - frame_height_mm / 2,
+                    'y_max': cam_y + frame_height_mm / 2,
+                    'width_mm': frame_width_mm,
+                    'height_mm': frame_height_mm,
+                    'using_fov_data': True
+                }
+            else:
+                # No FOV data available - don't show camera frame
+                self.camera_frame_bounds = None
+                self.log("No FOV data from camera manager - camera frame hidden", "debug")
+
         except Exception as e:
+            self.log(f"Error updating camera frame bounds: {e}", "error")
             self.camera_frame_bounds = None
+
+    def _update_camera_status_in_controls(self):
+        """Update camera status information in controls panel"""
+        if not self.controls_component:
+            return
+
+        try:
+            # Get camera info
+            connected = False
+            calibrated = False
+            resolution = (640, 480)
+            fov_data = None
+
+            if self.camera_manager:
+                camera_info = self.camera_manager.get_camera_info()
+                connected = camera_info.get('connected', False)
+                calibrated = camera_info.get('calibrated', False)
+                
+                if connected:
+                    resolution = (
+                        camera_info.get('width', 640),
+                        camera_info.get('height', 480)
+                    )
+                
+                fov_data = self.camera_manager.get_current_fov()
+
+            # Update controls
+            self.controls_component.update_camera_status(connected, calibrated)
+            self.controls_component.update_resolution_display(resolution[0], resolution[1])
+            self.controls_component.update_fov_status(fov_data)
+
+        except Exception as e:
+            self.log(f"Error updating camera status in controls: {e}", "error")
 
     def update_calibration_points(self):
         """Update calibration points from registration manager"""
@@ -565,11 +642,12 @@ class MachineAreaWindow:
                 height = camera_info.get('height', 480)
                 self.camera_resolution = (width, height)
 
-                if self.controls_component:
-                    self.controls_component.update_resolution_display(width, height)
-
                 self.log(f"Camera info updated: {width}x{height}")
 
+            # Update camera status in controls
+            self._update_camera_status_in_controls()
+
+            # Update frame bounds with new resolution/FOV data
             self.update_camera_frame_bounds()
             self.schedule_update()
 
@@ -599,10 +677,10 @@ class MachineAreaWindow:
             if display_options['show_machine_bounds']:
                 self.canvas_component.draw_machine_bounds()
 
-            # Draw origin marker (0,0) - where coordinate system origin is
+            # Draw origin marker (0,0)
             self.canvas_component.draw_origin_marker()
 
-            # Draw homing position - where machine goes when homing
+            # Draw homing position
             if self.hardware_service:
                 homing_pos = self.hardware_service.get_homing_position()
                 self.canvas_component.draw_homing_position(homing_pos)
@@ -631,7 +709,7 @@ class MachineAreaWindow:
             self.log(f"Error updating display: {e}", "error")
 
     def update_status_display(self):
-        """Update status text display"""
+        """Update status text display with FOV information"""
         if not self.status_text:
             return
 
@@ -646,10 +724,21 @@ class MachineAreaWindow:
             bounds = self.machine_bounds
             status_lines.append(f"Bounds: X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
 
-            # Camera status
+            # Camera status with FOV info from camera manager
             if self.current_camera_position:
                 cam_x, cam_y = self.current_camera_position
-                status_lines.append(f"Camera: ({cam_x:.1f}, {cam_y:.1f})")
+                camera_line = f"Camera: ({cam_x:.1f}, {cam_y:.1f})"
+
+                # Add FOV status from camera manager
+                if self.camera_manager:
+                    fov_data = self.camera_manager.get_current_fov()
+                    if fov_data:
+                        source = fov_data.get('calculated_from', 'unknown')
+                        camera_line += f" | FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm [{source}]"
+                    else:
+                        camera_line += " | FOV: No data"
+
+                status_lines.append(camera_line)
             else:
                 status_lines.append("Camera: No position")
 
@@ -699,8 +788,54 @@ class MachineAreaWindow:
                     self.machine_bounds['x_max'], self.machine_bounds['y_max']
                 )
 
+    def get_current_fov_info(self) -> dict:
+        """Get current FOV information for external use"""
+        fov_info = {
+            'has_fov_data': False,
+            'source': 'none',
+            'width_mm': 0.0,
+            'height_mm': 0.0,
+            'distance_mm': 0.0,
+            'pixels_per_mm': 0.0
+        }
+
+        try:
+            if self.camera_manager:
+                fov_data = self.camera_manager.get_current_fov()
+                if fov_data:
+                    fov_info.update({
+                        'has_fov_data': True,
+                        'source': 'camera_manager',
+                        'width_mm': fov_data['width_mm'],
+                        'height_mm': fov_data['height_mm'],
+                        'distance_mm': fov_data['distance_mm'],
+                        'pixels_per_mm': fov_data['pixels_per_mm'],
+                        'calculated_from': fov_data.get('calculated_from', 'unknown')
+                    })
+                else:
+                    fov_info.update({
+                        'has_fov_data': False,
+                        'source': 'no_data'
+                    })
+
+        except Exception as e:
+            self.log(f"Error getting FOV info: {e}", "error")
+
+        return fov_info
+
+    def force_fov_update(self):
+        """Force update of FOV data and camera frame bounds"""
+        try:
+            self.update_camera_frame_bounds()
+            self._update_camera_status_in_controls()
+            if self.is_visible:
+                self.schedule_update()
+            self.log("FOV data force updated")
+        except Exception as e:
+            self.log(f"Error in force FOV update: {e}", "error")
+
     def get_window_status(self) -> dict:
-        """Get current window status"""
+        """Get current window status including FOV information"""
         status = {
             'visible': self.is_visible,
             'auto_update': self.auto_update,
@@ -708,7 +843,8 @@ class MachineAreaWindow:
             'current_machine_position': self.current_machine_position.tolist(),
             'current_camera_position': self.current_camera_position,
             'routes_bounds': self.routes_bounds,
-            'calibration_points_count': len(self.calibration_points)
+            'calibration_points_count': len(self.calibration_points),
+            'fov_info': self.get_current_fov_info()
         }
 
         if self.hardware_service:
@@ -722,11 +858,41 @@ class MachineAreaWindow:
             view_info = self.canvas_component.get_view_info()
             status.update(view_info)
 
+        if self.camera_frame_bounds:
+            status['camera_frame_info'] = {
+                'width_mm': self.camera_frame_bounds['width_mm'],
+                'height_mm': self.camera_frame_bounds['height_mm'],
+                'using_fov_data': self.camera_frame_bounds.get('using_fov_data', False)
+            }
+
         return status
+
+    def get_enhanced_status(self) -> dict:
+        """Get enhanced status with detailed FOV and camera information"""
+        base_status = self.get_window_status()
+
+        # Add enhanced FOV details from camera manager
+        if self.camera_manager:
+            try:
+                camera_info = self.camera_manager.get_camera_info()
+                base_status['camera_manager_info'] = {
+                    'connected': camera_info.get('connected', False),
+                    'calibrated': camera_info.get('calibrated', False),
+                    'resolution': f"{camera_info.get('width', 0)}x{camera_info.get('height', 0)}",
+                    'has_fov_data': camera_info.get('fov') is not None
+                }
+
+                if camera_info.get('fov'):
+                    base_status['camera_manager_info']['fov_details'] = camera_info['fov']
+
+            except Exception as e:
+                self.log(f"Error getting enhanced camera info: {e}", "error")
+
+        return base_status
 
     def cleanup(self):
         """Clean up resources"""
         self.stop_update_thread()
         if self.window:
             self.window.destroy()
-        self.log("Machine area visualization cleaned up")
+        self.log("Machine area visualization with camera manager FOV integration cleaned up")

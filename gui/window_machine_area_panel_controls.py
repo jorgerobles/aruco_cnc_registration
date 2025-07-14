@@ -1,6 +1,7 @@
 """
 Machine Area Controls Panel Component
 Handles all control widgets and settings for the machine area visualization
+Updated to remove manual FOV controls and use only camera manager data
 """
 
 import tkinter as tk
@@ -28,10 +29,6 @@ class MachineAreaControls:
         self.show_calibration_points_var = tk.BooleanVar(value=True)
         self.show_grid_var = tk.BooleanVar(value=True)
 
-        # Camera configuration variables
-        self.camera_height_var = tk.StringVar(value="100.0")
-        self.pixels_per_mm_var = tk.StringVar(value="5.0")
-
         # Machine bounds variables
         self.x_max_var = tk.StringVar(value="400")
         self.y_max_var = tk.StringVar(value="400")
@@ -45,6 +42,8 @@ class MachineAreaControls:
         # Status labels
         self.zoom_label = None
         self.resolution_label = None
+        self.fov_status_label = None
+        self.camera_status_label = None
 
         # Setup the controls
         self.setup_controls()
@@ -69,7 +68,7 @@ class MachineAreaControls:
     def setup_controls(self):
         """Setup all control widgets"""
         # Create scrollable frame for controls
-        canvas_control = tk.Canvas(self.parent, width=230)
+        canvas_control = tk.Canvas(self.parent, width=250)
         scrollbar = ttk.Scrollbar(self.parent, orient="vertical", command=canvas_control.yview)
         scrollable_frame = ttk.Frame(canvas_control)
 
@@ -87,7 +86,7 @@ class MachineAreaControls:
         # Setup individual control sections
         self.setup_display_options(scrollable_frame)
         self.setup_view_controls(scrollable_frame)
-        self.setup_camera_config(scrollable_frame)
+        self.setup_camera_status(scrollable_frame)
         self.setup_machine_bounds(scrollable_frame)
         self.setup_update_controls(scrollable_frame)
         self.setup_debug_controls(scrollable_frame)
@@ -135,29 +134,36 @@ class MachineAreaControls:
 
         ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
 
-    def setup_camera_config(self, parent):
-        """Setup camera frame configuration"""
-        ttk.Label(parent, text="Camera Frame Config:").pack(anchor=tk.W, pady=(5, 0))
+    def setup_camera_status(self, parent):
+        """Setup camera status display (read-only)"""
+        ttk.Label(parent, text="Camera Status:").pack(anchor=tk.W, pady=(5, 0))
 
-        camera_frame = ttk.Frame(parent)
-        camera_frame.pack(fill=tk.X, pady=2)
+        # Camera connection status
+        self.camera_status_label = ttk.Label(parent, text="Status: Disconnected",
+                                           font=("TkDefaultFont", 8))
+        self.camera_status_label.pack(anchor=tk.W, pady=2)
 
-        ttk.Label(camera_frame, text="Height (mm):").grid(row=0, column=0, sticky=tk.W)
-        height_entry = ttk.Entry(camera_frame, textvariable=self.camera_height_var, width=8)
-        height_entry.grid(row=0, column=1, padx=(5, 0))
-        height_entry.bind('<Return>', self.on_camera_config_changed)
+        # Resolution display
+        resolution_frame = ttk.Frame(parent)
+        resolution_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(resolution_frame, text="Resolution:").pack(side=tk.LEFT)
+        self.resolution_label = ttk.Label(resolution_frame, text="640x480",
+                                        font=("TkDefaultFont", 8))
+        self.resolution_label.pack(side=tk.LEFT, padx=(5, 0))
 
-        ttk.Label(camera_frame, text="Pixels/mm:").grid(row=1, column=0, sticky=tk.W)
-        pixels_entry = ttk.Entry(camera_frame, textvariable=self.pixels_per_mm_var, width=8)
-        pixels_entry.grid(row=1, column=1, padx=(5, 0))
-        pixels_entry.bind('<Return>', self.on_camera_config_changed)
+        # FOV status display
+        self.fov_status_label = ttk.Label(parent, text="FOV: No data",
+                                        font=("TkDefaultFont", 8))
+        self.fov_status_label.pack(anchor=tk.W, pady=2)
 
-        ttk.Label(camera_frame, text="Resolution:").grid(row=2, column=0, sticky=tk.W)
-        self.resolution_label = ttk.Label(camera_frame, text="640x480")
-        self.resolution_label.grid(row=2, column=1, padx=(5, 0), sticky=tk.W)
+        # Camera control buttons
+        button_frame = ttk.Frame(parent)
+        button_frame.pack(fill=tk.X, pady=5)
 
-        ttk.Button(camera_frame, text="Update", command=self.on_camera_config_changed).grid(
-            row=3, column=0, columnspan=2, pady=5)
+        ttk.Button(button_frame, text="Update Camera Info",
+                  command=self.update_camera_info).pack(fill=tk.X, pady=1)
+        ttk.Button(button_frame, text="Calculate FOV",
+                  command=self.calculate_fov).pack(fill=tk.X, pady=1)
 
         ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
 
@@ -190,7 +196,6 @@ class MachineAreaControls:
 
         ttk.Button(parent, text="Refresh Now", command=self.manual_update).pack(fill=tk.X, pady=2)
         ttk.Button(parent, text="Center View", command=self.center_view).pack(fill=tk.X, pady=2)
-        ttk.Button(parent, text="Update Camera Info", command=self.update_camera_info).pack(fill=tk.X, pady=2)
 
         ttk.Separator(parent, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=5)
 
@@ -220,20 +225,6 @@ class MachineAreaControls:
     def zoom_to_fit(self):
         """Zoom to fit"""
         self._call_callback('zoom_to_fit')
-
-    def on_camera_config_changed(self, event=None):
-        """Handle camera configuration changes"""
-        try:
-            height = float(self.camera_height_var.get())
-            pixels_per_mm = float(self.pixels_per_mm_var.get())
-
-            self._call_callback('camera_config_changed', {
-                'height_mm': height,
-                'pixels_per_mm': pixels_per_mm
-            })
-
-        except ValueError:
-            self.log("Invalid camera configuration values", "error")
 
     def on_bounds_changed(self, event=None):
         """Handle machine bounds changes"""
@@ -265,6 +256,10 @@ class MachineAreaControls:
         """Update camera info"""
         self._call_callback('update_camera_info')
 
+    def calculate_fov(self):
+        """Trigger FOV calculation"""
+        self._call_callback('calculate_fov')
+
     def debug_show_data(self):
         """Debug show data"""
         if self.debug_enabled_var.get():
@@ -283,16 +278,6 @@ class MachineAreaControls:
             'show_calibration_points': self.show_calibration_points_var.get(),
             'show_grid': self.show_grid_var.get()
         }
-
-    def get_camera_config(self) -> Dict[str, float]:
-        """Get current camera configuration"""
-        try:
-            return {
-                'height_mm': float(self.camera_height_var.get()),
-                'pixels_per_mm': float(self.pixels_per_mm_var.get())
-            }
-        except ValueError:
-            return {'height_mm': 100.0, 'pixels_per_mm': 5.0}
 
     def get_machine_bounds(self) -> Dict[str, float]:
         """Get current machine bounds"""
@@ -323,10 +308,44 @@ class MachineAreaControls:
         if self.resolution_label:
             self.resolution_label.config(text=f"{width}x{height}")
 
-    def set_camera_config(self, height_mm: float, pixels_per_mm: float):
-        """Set camera configuration values"""
-        self.camera_height_var.set(str(height_mm))
-        self.pixels_per_mm_var.set(str(pixels_per_mm))
+    def update_camera_status(self, connected: bool, calibrated: bool = False):
+        """Update camera status display"""
+        if self.camera_status_label:
+            if connected:
+                cal_text = " | Calibrated" if calibrated else " | Not calibrated"
+                self.camera_status_label.config(text=f"Status: Connected{cal_text}")
+            else:
+                self.camera_status_label.config(text="Status: Disconnected")
+
+    def update_fov_status(self, fov_data: Optional[Dict[str, Any]]):
+        """Update FOV status display with camera manager data"""
+        if not self.fov_status_label:
+            return
+
+        if fov_data is None:
+            self.fov_status_label.config(text="FOV: No data")
+            return
+
+        try:
+            width_mm = fov_data.get('width_mm', 0)
+            height_mm = fov_data.get('height_mm', 0)
+            pixels_per_mm = fov_data.get('pixels_per_mm', 0)
+            source = fov_data.get('calculated_from', 'unknown')
+
+            # Create status text based on data source
+            if source == 'aruco_detection':
+                status_text = f"FOV: {width_mm:.1f}×{height_mm:.1f}mm ({pixels_per_mm:.2f}px/mm) [ArUco]"
+            elif source == 'averaged_aruco_detection':
+                num_samples = fov_data.get('num_samples', 0)
+                status_text = f"FOV: {width_mm:.1f}×{height_mm:.1f}mm ({pixels_per_mm:.2f}px/mm) [Avg:{num_samples}]"
+            else:
+                status_text = f"FOV: {width_mm:.1f}×{height_mm:.1f}mm ({pixels_per_mm:.2f}px/mm) [Calc]"
+
+            self.fov_status_label.config(text=status_text)
+
+        except Exception as e:
+            self.log(f"Error updating FOV status: {e}", "error")
+            self.fov_status_label.config(text="FOV: Error displaying data")
 
     def set_machine_bounds(self, x_max: float, y_max: float):
         """Set machine bounds values"""
@@ -352,3 +371,10 @@ class MachineAreaControls:
 
         if option in option_map:
             option_map[option].set(value)
+
+    # REMOVED METHODS (no longer needed):
+    # - get_camera_config()
+    # - set_camera_config()
+    # - on_camera_config_changed()
+    # - setup_camera_config()
+    # All manual FOV configuration has been removed
