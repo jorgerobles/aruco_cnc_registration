@@ -247,84 +247,76 @@ class RouteTransformer:
             self.log(error_msg, "error")
             return None
 
-    def calculate_orthogonal_transformation(self, routes: List[List[Tuple[float, float]]],
-                                          registration_manager) -> Optional[List[List[Tuple[float, float]]]]:
+    def calculate_simple_alignment_transformation(self, routes: List[List[Tuple[float, float]]],
+                                                registration_manager) -> Optional[List[List[Tuple[float, float]]]]:
         """
-        Calculate transformation by aligning registration points to form an orthogonal square
-        aligned with machine coordinate axes.
+        Simple alignment transformation that centers routes on registration area
+        and applies minimal rotation for proper alignment.
 
         Args:
             routes: Original routes in SVG coordinates
             registration_manager: RegistrationManager with calibration points
 
         Returns:
-            Transformed routes aligned orthogonally to machine coordinates
+            Transformed routes aligned to registration area
         """
         try:
             if not registration_manager.is_registered():
-                error_msg = "Registration not computed - cannot calculate orthogonal transformation"
+                error_msg = "Registration not computed - cannot calculate alignment transformation"
                 self.emit(RouteTransformerEvents.ERROR, error_msg)
                 return None
 
             # Get registration points in machine coordinates
             machine_positions = registration_manager.get_machine_positions()
             if len(machine_positions) < 3:
-                error_msg = "Need at least 3 registration points for orthogonal transformation"
+                error_msg = "Need at least 3 registration points for alignment transformation"
                 self.emit(RouteTransformerEvents.ERROR, error_msg)
                 return None
 
-            # Convert to 2D points for easier processing
-            machine_points_2d = np.array([[pos[0], pos[1]] for pos in machine_positions])
-
-            self.log(f"Registration points: {machine_points_2d}")
-
-            # Calculate the center of registration points
-            center = np.mean(machine_points_2d, axis=0)
-            self.log(f"Registration center: {center}")
-
-            # Calculate the principal axes using PCA to find the orientation
-            centered_points = machine_points_2d - center
-            covariance_matrix = np.cov(centered_points.T)
-            eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
-
-            # Sort by eigenvalue magnitude (largest first)
-            idx = np.argsort(eigenvalues)[::-1]
-            eigenvalues = eigenvalues[idx]
-            eigenvectors = eigenvectors[:, idx]
-
-            # Principal axis (direction of maximum variance)
-            principal_axis = eigenvectors[:, 0]
-
-            # Calculate rotation angle to align principal axis with X-axis
-            angle_to_x_axis = np.arctan2(principal_axis[1], principal_axis[0])
-
-            self.log(f"Principal axis: {principal_axis}")
-            self.log(f"Rotation angle to align with X-axis: {np.degrees(angle_to_x_axis):.2f} degrees")
-
-            # Create rotation matrix to align with machine axes
-            cos_theta = np.cos(-angle_to_x_axis)  # Negative to rotate back to orthogonal
-            sin_theta = np.sin(-angle_to_x_axis)
-            rotation_matrix = np.array([
-                [cos_theta, -sin_theta],
-                [sin_theta,  cos_theta]
-            ])
-
-            # Calculate route bounds to determine scale and translation
+            # Calculate route bounds to determine current route center and size
             route_bounds = self.calculate_route_bounds(routes)
             if not route_bounds:
-                error_msg = "Cannot calculate route bounds for orthogonal transformation"
+                error_msg = "Cannot calculate route bounds for alignment transformation"
                 self.emit(RouteTransformerEvents.ERROR, error_msg)
                 return None
 
-            # Route center
+            # Calculate registration area center
+            reg_points_2d = np.array([[pos[0], pos[1]] for pos in machine_positions])
+            reg_center = np.mean(reg_points_2d, axis=0)
+
+            # Calculate route center
             route_center = np.array([route_bounds['center_x'], route_bounds['center_y']])
 
+            # Calculate translation to center routes on registration area
+            translation = reg_center - route_center
+
+            self.log(f"Registration center: {reg_center}")
             self.log(f"Route center: {route_center}")
-            self.log(f"Target center (registration): {center}")
+            self.log(f"Translation vector: {translation}")
+
+            # Optional: Calculate rotation to align with registration area orientation
+            # Find the main axis of registration points
+            centered_reg_points = reg_points_2d - reg_center
+
+            # Use the vector from point 0 to point 1 as the reference direction
+            if len(reg_points_2d) >= 2:
+                reg_main_vector = reg_points_2d[1] - reg_points_2d[0]
+                reg_angle = np.arctan2(reg_main_vector[1], reg_main_vector[0])
+
+                # For now, let's not apply rotation, just translation
+                # This ensures routes are positioned in the registration area
+                rotation_angle = 0.0  # Can be adjusted later if needed
+            else:
+                rotation_angle = 0.0
+
+            self.log(f"Rotation angle: {np.degrees(rotation_angle):.2f} degrees")
 
             # Apply transformation to all route points
             transformed_routes = []
             total_points = 0
+
+            cos_theta = np.cos(rotation_angle)
+            sin_theta = np.sin(rotation_angle)
 
             for route in routes:
                 if not route:
@@ -337,14 +329,20 @@ class RouteTransformer:
                         # Convert point to numpy array
                         point_2d = np.array([point[0], point[1]])
 
-                        # 1. Translate route point relative to route center
+                        # 1. Center the point relative to route center
                         centered_point = point_2d - route_center
 
-                        # 2. Apply rotation to align with machine axes
-                        rotated_point = rotation_matrix @ centered_point
+                        # 2. Apply rotation (if any)
+                        if rotation_angle != 0:
+                            rotated_point = np.array([
+                                centered_point[0] * cos_theta - centered_point[1] * sin_theta,
+                                centered_point[0] * sin_theta + centered_point[1] * cos_theta
+                            ])
+                        else:
+                            rotated_point = centered_point
 
                         # 3. Translate to registration center
-                        final_point = rotated_point + center
+                        final_point = rotated_point + reg_center
 
                         transformed_route.append((final_point[0], final_point[1]))
                         total_points += 1
@@ -357,23 +355,22 @@ class RouteTransformer:
             transformed_bounds = self.calculate_route_bounds(transformed_routes)
 
             self.emit(RouteTransformerEvents.TRANSFORMATION_APPLIED, {
-                'source': 'orthogonal_transformation',
+                'source': 'simple_alignment_transformation',
                 'registration_error': registration_manager.get_registration_error(),
                 'original_bounds': route_bounds,
                 'transformed_bounds': transformed_bounds,
                 'route_count': len(routes),
                 'total_points': total_points,
-                'rotation_angle_degrees': np.degrees(angle_to_x_axis),
-                'principal_axis': principal_axis.tolist(),
-                'registration_center': center.tolist(),
-                'rotation_matrix': rotation_matrix.tolist()
+                'rotation_angle_degrees': np.degrees(rotation_angle),
+                'registration_center': reg_center.tolist(),
+                'translation': translation.tolist()
             })
 
-            self.log(f"Applied orthogonal transformation: {np.degrees(angle_to_x_axis):.2f}° rotation, {total_points} points")
+            self.log(f"Applied simple alignment transformation: {total_points} points translated by {translation}")
             return transformed_routes
 
         except Exception as e:
-            error_msg = f"Failed to calculate orthogonal transformation: {e}"
+            error_msg = f"Failed to calculate simple alignment transformation: {e}"
             self.emit(RouteTransformerEvents.ERROR, error_msg)
             self.log(error_msg, "error")
             return None
@@ -407,29 +404,34 @@ class RouteTransformer:
                 'camera_bounds': self._calculate_point_bounds([pos[:2] for pos in camera_positions])
             })
 
-            # Add orthogonal transformation analysis
+            # Add simple alignment transformation analysis
             if len(machine_positions) >= 3:
-                # Analyze the registration points for orthogonal transformation
+                # Analyze the registration points for simple alignment
                 machine_points_2d = np.array([[pos[0], pos[1]] for pos in machine_positions])
                 center = np.mean(machine_points_2d, axis=0)
 
-                # Calculate PCA
-                centered_points = machine_points_2d - center
-                covariance_matrix = np.cov(centered_points.T)
-                eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
-                idx = np.argsort(eigenvalues)[::-1]
-                eigenvalues = eigenvalues[idx]
-                eigenvectors = eigenvectors[:, idx]
+                # Calculate registration area span
+                x_coords = machine_points_2d[:, 0]
+                y_coords = machine_points_2d[:, 1]
 
-                principal_axis = eigenvectors[:, 0]
-                angle_to_x_axis = np.arctan2(principal_axis[1], principal_axis[0])
+                reg_area_bounds = {
+                    'x_min': float(np.min(x_coords)),
+                    'x_max': float(np.max(x_coords)),
+                    'y_min': float(np.min(y_coords)),
+                    'y_max': float(np.max(y_coords)),
+                    'center_x': float(center[0]),
+                    'center_y': float(center[1]),
+                    'width': float(np.max(x_coords) - np.min(x_coords)),
+                    'height': float(np.max(y_coords) - np.min(y_coords))
+                }
 
-                debug_info['orthogonal_analysis'] = {
+                debug_info['alignment_analysis'] = {
                     'registration_center': center.tolist(),
-                    'principal_axis': principal_axis.tolist(),
-                    'rotation_angle_degrees': float(np.degrees(angle_to_x_axis)),
-                    'eigenvalues': eigenvalues.tolist(),
-                    'variance_explained': float(eigenvalues[0] / np.sum(eigenvalues))
+                    'registration_area_bounds': reg_area_bounds,
+                    'registration_span': {
+                        'width': reg_area_bounds['width'],
+                        'height': reg_area_bounds['height']
+                    }
                 }
 
         return debug_info

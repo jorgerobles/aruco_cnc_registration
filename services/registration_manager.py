@@ -395,6 +395,10 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
                 'error': self._registration_error
             })
 
+            if len(self.calibration_points) >= 3:
+                self.log(f"Auto-computing registration with {len(self.calibration_points)} loaded points")
+                self.compute_registration()
+
             return True
 
         except Exception as e:
@@ -585,6 +589,10 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
                 'point_count': len(self.calibration_points),
                 'error': self._registration_error
             })
+
+            if len(self.calibration_points) >= 3:
+                self.log(f"Auto-computing registration with {len(self.calibration_points)} loaded points")
+                self.compute_registration()
 
             return True
 
