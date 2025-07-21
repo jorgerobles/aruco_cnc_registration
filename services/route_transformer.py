@@ -1,194 +1,268 @@
 """
-Route Transformer
-Transforms SVG routes to machine coordinates using registration data
+Route Transformer Service
+Handles rigid transformations of route data for CNC registration alignment
 """
 
 import numpy as np
-from typing import List, Tuple
-from svg.svg_loader import svg_to_routes
-from services.registration_manager import RegistrationManager
+from typing import List, Tuple, Optional, Dict, Any
+from services.event_broker import event_aware
 
 
+class RouteTransformerEvents:
+    """Route transformer specific events"""
+    ROUTES_TRANSFORMED = "route_transformer.routes_transformed"
+    TRANSFORMATION_APPLIED = "route_transformer.transformation_applied"
+    BOUNDS_CALCULATED = "route_transformer.bounds_calculated"
+    ERROR = "route_transformer.error"
+
+
+@event_aware()
 class RouteTransformer:
-    """Transforms SVG routes to machine coordinates using camera registration"""
+    """Service for applying rigid transformations to route data"""
 
-    def __init__(self, registration_manager: RegistrationManager):
+    def __init__(self, logger=None):
+        self.logger = logger
+        self.log("RouteTransformer service initialized")
+
+    def log(self, message: str, level: str = "info"):
+        """Log message if logger is available"""
+        if self.logger:
+            self.logger(f"[RouteTransformer] {message}", level)
+
+    def calculate_route_bounds(self, routes: List[List[Tuple[float, float]]]) -> Optional[Dict[str, float]]:
         """
-        Initialize with a RegistrationManager instance
+        Calculate outer bounds of all routes
 
         Args:
-            registration_manager: Configured RegistrationManager with computed registration
-        """
-        self.registration_manager = registration_manager
-
-    def load_and_transform_svg(self, svg_file: str, angle_threshold: float = 5.0) -> List[List[Tuple[float, float]]]:
-        """
-        Load SVG routes and transform them to machine coordinates
-
-        Args:
-            svg_file: Path to SVG file
-            angle_threshold: Angle threshold for path conversion
+            routes: List of routes, each route is a list of (x, y) points
 
         Returns:
-            List of transformed routes, where each route is a list of (x, y) machine coordinates
+            Dict with keys: x_min, y_min, x_max, y_max, center_x, center_y, width, height
         """
-        if not self.registration_manager.is_registered():
-            raise ValueError("Registration manager must be registered before transforming routes")
+        if not routes or not any(routes):
+            return None
 
-        # Load SVG routes
-        svg_routes = svg_to_routes(svg_file, angle_threshold=angle_threshold)
+        try:
+            all_points = []
+            for route in routes:
+                if route:  # Skip empty routes
+                    all_points.extend(route)
 
-        # Transform each route
-        transformed_routes = []
-        for route in svg_routes:
-            transformed_route = self.transform_route(route)
-            transformed_routes.append(transformed_route)
+            if not all_points:
+                return None
 
-        return transformed_routes
+            x_coords = [point[0] for point in all_points]
+            y_coords = [point[1] for point in all_points]
 
-    def transform_route(self, route: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+            bounds = {
+                'x_min': min(x_coords),
+                'y_min': min(y_coords),
+                'x_max': max(x_coords),
+                'y_max': max(y_coords)
+            }
+
+            bounds.update({
+                'center_x': (bounds['x_min'] + bounds['x_max']) / 2,
+                'center_y': (bounds['y_min'] + bounds['y_max']) / 2,
+                'width': bounds['x_max'] - bounds['x_min'],
+                'height': bounds['y_max'] - bounds['y_min']
+            })
+
+            self.emit(RouteTransformerEvents.BOUNDS_CALCULATED, {
+                'bounds': bounds,
+                'point_count': len(all_points),
+                'route_count': len([r for r in routes if r])
+            })
+
+            return bounds
+
+        except Exception as e:
+            error_msg = f"Failed to calculate route bounds: {e}"
+            self.emit(RouteTransformerEvents.ERROR, error_msg)
+            self.log(error_msg, "error")
+            return None
+
+    def apply_rigid_transformation(self, routes: List[List[Tuple[float, float]]],
+                                  transformation_matrix: np.ndarray,
+                                  translation_vector: np.ndarray) -> List[List[Tuple[float, float]]]:
         """
-        Transform a single route from SVG coordinates to machine coordinates
+        Apply rigid transformation (rotation + translation) to routes
 
         Args:
-            route: List of (x, y) coordinates in SVG space
+            routes: Original routes
+            transformation_matrix: 3x3 or 2x2 rotation matrix
+            translation_vector: Translation vector
 
         Returns:
-            List of (x, y) coordinates in machine space
+            Transformed routes
         """
-        if not self.registration_manager.is_registered():
-            raise ValueError("Registration manager must be registered before transforming routes")
+        try:
+            if not routes:
+                return routes
 
-        transformed_points = []
+            transformed_routes = []
+            total_points = 0
 
-        for x, y in route:
-            # Convert 2D SVG point to 3D for transformation (assuming z=0)
-            svg_point = np.array([x, y, 0.0])
+            for route in routes:
+                if not route:
+                    transformed_routes.append(route)
+                    continue
 
-            # Transform to machine coordinates
-            machine_point = self.registration_manager.transform_point(svg_point)
+                transformed_route = []
 
-            # Extract x, y coordinates (assuming we only need 2D output)
-            transformed_points.append((machine_point[0], machine_point[1]))
+                for point in route:
+                    # Convert to homogeneous coordinates for 2D transformation
+                    if len(point) >= 2:
+                        # Create 3D point (x, y, 0) for 2D transformation
+                        point_3d = np.array([point[0], point[1], 0.0])
 
-        return transformed_points
+                        # Apply transformation: R @ point + t
+                        if transformation_matrix.shape == (3, 3):
+                            # 3D transformation matrix
+                            transformed_3d = transformation_matrix @ point_3d + translation_vector
+                            transformed_point = (transformed_3d[0], transformed_3d[1])
+                        else:
+                            # 2D transformation matrix - extend to 3D
+                            point_2d = np.array([point[0], point[1]])
+                            if transformation_matrix.shape == (2, 2):
+                                transformed_2d = transformation_matrix @ point_2d + translation_vector[:2]
+                                transformed_point = (transformed_2d[0], transformed_2d[1])
+                            else:
+                                raise ValueError(f"Unsupported transformation matrix shape: {transformation_matrix.shape}")
 
-    def transform_single_point(self, x: float, y: float, z: float = 0.0) -> Tuple[float, float, float]:
+                        transformed_route.append(transformed_point)
+                        total_points += 1
+                    else:
+                        # Keep original point if not enough coordinates
+                        transformed_route.append(point)
+
+                transformed_routes.append(transformed_route)
+
+            self.emit(RouteTransformerEvents.ROUTES_TRANSFORMED, {
+                'original_route_count': len(routes),
+                'transformed_route_count': len(transformed_routes),
+                'total_points_transformed': total_points,
+                'transformation_matrix_shape': transformation_matrix.shape,
+                'translation_vector_shape': translation_vector.shape
+            })
+
+            self.log(f"Applied rigid transformation to {len(routes)} routes with {total_points} total points")
+            return transformed_routes
+
+        except Exception as e:
+            error_msg = f"Failed to apply rigid transformation: {e}"
+            self.emit(RouteTransformerEvents.ERROR, error_msg)
+            self.log(error_msg, "error")
+            return routes  # Return original routes on error
+
+    def apply_registration_transformation(self, routes: List[List[Tuple[float, float]]],
+                                        registration_manager) -> Optional[List[List[Tuple[float, float]]]]:
         """
-        Transform a single point from SVG coordinates to machine coordinates
+        Apply transformation from registration manager to routes
 
         Args:
-            x, y: SVG coordinates
-            z: Z coordinate (default 0.0)
+            routes: Original routes
+            registration_manager: RegistrationManager with computed transformation
 
         Returns:
-            (x, y, z) machine coordinates
+            Transformed routes or None if registration not available
         """
-        if not self.registration_manager.is_registered():
-            raise ValueError("Registration manager must be registered before transforming points")
+        try:
+            if not registration_manager.is_registered():
+                error_msg = "Registration not computed - cannot apply transformation"
+                self.emit(RouteTransformerEvents.ERROR, error_msg)
+                self.log(error_msg, "error")
+                return None
 
-        svg_point = np.array([x, y, z])
-        machine_point = self.registration_manager.transform_point(svg_point)
+            # Get transformation data from registration manager
+            transformation_matrix = registration_manager.transformation_matrix
+            translation_vector = registration_manager.translation_vector
 
-        return (machine_point[0], machine_point[1], machine_point[2])
+            if transformation_matrix is None or translation_vector is None:
+                error_msg = "Invalid transformation data from registration manager"
+                self.emit(RouteTransformerEvents.ERROR, error_msg)
+                self.log(error_msg, "error")
+                return None
 
-    def get_route_bounds(self, routes: List[List[Tuple[float, float]]]) -> Tuple[float, float, float, float]:
+            # Apply the transformation
+            transformed_routes = self.apply_rigid_transformation(
+                routes, transformation_matrix, translation_vector
+            )
+
+            # Calculate bounds for both original and transformed routes
+            original_bounds = self.calculate_route_bounds(routes)
+            transformed_bounds = self.calculate_route_bounds(transformed_routes)
+
+            self.emit(RouteTransformerEvents.TRANSFORMATION_APPLIED, {
+                'source': 'registration_manager',
+                'registration_error': registration_manager.get_registration_error(),
+                'original_bounds': original_bounds,
+                'transformed_bounds': transformed_bounds,
+                'route_count': len(routes)
+            })
+
+            self.log(f"Applied registration transformation to {len(routes)} routes")
+            return transformed_routes
+
+        except Exception as e:
+            error_msg = f"Failed to apply registration transformation: {e}"
+            self.emit(RouteTransformerEvents.ERROR, error_msg)
+            self.log(error_msg, "error")
+            return None
+
+    def transform_bounds_to_machine_coordinates(self, route_bounds: Dict[str, float],
+                                              registration_manager) -> Optional[Dict[str, float]]:
         """
-        Get bounding box of all transformed routes
+        Transform route bounds to machine coordinates using registration
 
         Args:
-            routes: List of transformed routes
+            route_bounds: Route bounds dictionary
+            registration_manager: RegistrationManager with computed transformation
 
         Returns:
-            (min_x, min_y, max_x, max_y) bounding box
+            Transformed bounds in machine coordinates
         """
-        if not routes:
-            return (0, 0, 0, 0)
+        try:
+            if not registration_manager.is_registered():
+                return None
 
-        all_x = []
-        all_y = []
+            # Transform corner points
+            corners = [
+                (route_bounds['x_min'], route_bounds['y_min']),
+                (route_bounds['x_max'], route_bounds['y_min']),
+                (route_bounds['x_max'], route_bounds['y_max']),
+                (route_bounds['x_min'], route_bounds['y_max'])
+            ]
 
-        for route in routes:
-            for x, y in route:
-                all_x.append(x)
-                all_y.append(y)
+            transformed_corners = []
+            for corner in corners:
+                # Convert to 3D camera coordinates (assuming z=0)
+                camera_point = np.array([corner[0], corner[1], 0.0])
+                machine_point = registration_manager.transform_point(camera_point)
+                transformed_corners.append((machine_point[0], machine_point[1]))
 
-        return (min(all_x), min(all_y), max(all_x), max(all_y))
+            # Calculate new bounds
+            x_coords = [corner[0] for corner in transformed_corners]
+            y_coords = [corner[1] for corner in transformed_corners]
 
-    def get_total_route_length(self, routes: List[List[Tuple[float, float]]]) -> float:
-        """
-        Calculate total length of all routes
+            machine_bounds = {
+                'x_min': min(x_coords),
+                'y_min': min(y_coords),
+                'x_max': max(x_coords),
+                'y_max': max(y_coords)
+            }
 
-        Args:
-            routes: List of transformed routes
+            machine_bounds.update({
+                'center_x': (machine_bounds['x_min'] + machine_bounds['x_max']) / 2,
+                'center_y': (machine_bounds['y_min'] + machine_bounds['y_max']) / 2,
+                'width': machine_bounds['x_max'] - machine_bounds['x_min'],
+                'height': machine_bounds['y_max'] - machine_bounds['y_min']
+            })
 
-        Returns:
-            Total length in mm
-        """
-        total_distance = 0.0
+            return machine_bounds
 
-        for route in routes:
-            for i in range(len(route) - 1):
-                x1, y1 = route[i]
-                x2, y2 = route[i + 1]
-                distance = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
-                total_distance += distance
-
-        return total_distance
-
-
-def example_usage():
-    """Example of how to use the RouteTransformer"""
-
-    # Create and configure registration manager
-    reg_manager = RegistrationManager()
-
-    # Add calibration points (example data)
-    # In practice, these would come from your calibration process
-    machine_pos1 = np.array([10.0, 10.0, 0.0])
-    camera_tvec1 = np.array([100.0, 100.0, 0.0])
-    norm_pos1 = np.array([0.1, 0.1])
-    reg_manager.add_calibration_point(machine_pos1, camera_tvec1, norm_pos1)
-
-    machine_pos2 = np.array([50.0, 10.0, 0.0])
-    camera_tvec2 = np.array([500.0, 100.0, 0.0])
-    norm_pos2 = np.array([0.5, 0.1])
-    reg_manager.add_calibration_point(machine_pos2, camera_tvec2, norm_pos2)
-
-    machine_pos3 = np.array([30.0, 40.0, 0.0])
-    camera_tvec3 = np.array([300.0, 400.0, 0.0])
-    norm_pos3 = np.array([0.3, 0.4])
-    reg_manager.add_calibration_point(machine_pos3, camera_tvec3, norm_pos3)
-
-    # Compute registration
-    try:
-        reg_manager.compute_registration()
-        print(f"Registration successful! Error: {reg_manager.get_registration_error():.3f}mm")
-    except Exception as e:
-        print(f"Registration failed: {e}")
-        return
-
-    # Create route transformer
-    transformer = RouteTransformer(reg_manager)
-
-    # Transform SVG routes
-    try:
-        svg_file = "../data/test_registro.svg"  # Replace with your SVG file
-        transformed_routes = transformer.load_and_transform_svg(svg_file)
-
-        print(f"Loaded {len(transformed_routes)} routes")
-
-        # Get bounds
-        bounds = transformer.get_route_bounds(transformed_routes)
-        print(f"Route bounds: X({bounds[0]:.2f}, {bounds[2]:.2f}) Y({bounds[1]:.2f}, {bounds[3]:.2f})")
-
-        # Calculate total route length
-        total_length = transformer.get_total_route_length(transformed_routes)
-        print(f"Total route length: {total_length:.2f} mm")
-
-    except Exception as e:
-        print(f"Error processing SVG: {e}")
-
-
-if __name__ == "__main__":
-    example_usage()
+        except Exception as e:
+            error_msg = f"Failed to transform bounds to machine coordinates: {e}"
+            self.emit(RouteTransformerEvents.ERROR, error_msg)
+            self.log(error_msg, "error")
+            return None

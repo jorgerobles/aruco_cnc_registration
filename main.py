@@ -11,7 +11,7 @@ from services.grbl_controller import GRBLController
 from services.hardware_service import HardwareService, MachineOrigin
 from services.registration_manager import RegistrationManager
 from services.routes_manager import RouteManager
-
+from services.route_transformer import RouteTransformer
 
 def main():
     """Main application entry point"""

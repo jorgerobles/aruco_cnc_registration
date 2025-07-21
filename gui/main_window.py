@@ -28,6 +28,7 @@ from services.events import ApplicationEvents
 from services.grbl_controller import GRBLEvents
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
 from services.registration_manager import RegistrationEvents
+from gui.panel_transform import RouteTransformationPanel
 
 
 @event_aware()
@@ -52,6 +53,7 @@ class RegistrationGUI:
         self.calibration_panel = None
         self.debug_panel = None
         self.machine_area_panel = None
+        self.route_transformation_panel = None
 
         # Machine area window (will be initialized later)
         self.machine_area_window = None
@@ -357,6 +359,13 @@ class RegistrationGUI:
             self.log
         )
 
+        self.route_transformation_panel = RouteTransformationPanel(
+            scrollable_frame,
+            self.route_manager,
+            self.registration_manager,
+            self.log
+        )
+
     def setup_display_panel(self, parent):
         """Setup camera display panel with overlays"""
         # Create camera display without overlays
@@ -386,6 +395,8 @@ class RegistrationGUI:
         self.svg_panel = SVGRoutesPanel(
             control_parent, self.route_manager, self.log
         )
+
+
 
     def setup_debug_panel(self, parent):
         """Setup debug panel using the dedicated DebugPanel class"""
@@ -926,6 +937,9 @@ class RegistrationGUI:
             if hasattr(self, 'machine_area_window') and self.machine_area_window:
                 self.machine_area_window.update_all_data()
                 self.machine_area_window.schedule_update()
+
+            if self.route_transformation_panel:
+                self.route_transformation_panel._update_ui_state()
 
             self.log("All panels refreshed", "info")
 
