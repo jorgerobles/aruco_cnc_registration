@@ -80,17 +80,17 @@ class RouteTransformationPanel:
         status_frame.pack(fill=tk.X, padx=5, pady=5)
 
         # Routes status
-        ttk.Label(status_frame, text="Routes:").grid(row=0, column=0, sticky=tk.W, padx=(0,5))
+        ttk.Label(status_frame, text="Routes:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
         self.routes_status_label = ttk.Label(status_frame, textvariable=self.route_status_var, foreground="gray")
         self.routes_status_label.grid(row=0, column=1, sticky=tk.W)
 
         # Registration status
-        ttk.Label(status_frame, text="Registration:").grid(row=1, column=0, sticky=tk.W, padx=(0,5))
+        ttk.Label(status_frame, text="Registration:").grid(row=1, column=0, sticky=tk.W, padx=(0, 5))
         self.reg_status_label = ttk.Label(status_frame, textvariable=self.registration_status_var, foreground="gray")
         self.reg_status_label.grid(row=1, column=1, sticky=tk.W)
 
         # Bounds info
-        ttk.Label(status_frame, text="Bounds:").grid(row=2, column=0, sticky=tk.W, padx=(0,5))
+        ttk.Label(status_frame, text="Bounds:").grid(row=2, column=0, sticky=tk.W, padx=(0, 5))
         self.bounds_status_label = ttk.Label(status_frame, textvariable=self.bounds_info_var, foreground="gray")
         self.bounds_status_label.grid(row=2, column=1, sticky=tk.W)
 
@@ -104,19 +104,39 @@ class RouteTransformationPanel:
             button_frame, text="Calculate Route Bounds",
             command=self.calculate_route_bounds
         )
-        self.calculate_bounds_btn.pack(side=tk.LEFT, padx=(0,5))
+        self.calculate_bounds_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        # Two transformation options
+        transform_options_frame = ttk.Frame(self.frame)
+        transform_options_frame.pack(fill=tk.X, padx=5, pady=5)
 
         self.apply_transform_btn = ttk.Button(
-            button_frame, text="Apply Registration Transform",
+            transform_options_frame, text="Apply Registration Matrix",
             command=self.apply_registration_transformation
         )
-        self.apply_transform_btn.pack(side=tk.LEFT, padx=(0,5))
+        self.apply_transform_btn.pack(side=tk.LEFT, padx=(0, 5))
+
+        self.align_routes_btn = ttk.Button(
+            transform_options_frame, text="Orthogonal Transform",
+            command=self.apply_orthogonal_transformation
+        )
+        self.align_routes_btn.pack(side=tk.LEFT, padx=(0, 5))
 
         self.revert_transform_btn = ttk.Button(
-            button_frame, text="Revert to Original",
+            transform_options_frame, text="Revert to Original",
             command=self.revert_to_original
         )
         self.revert_transform_btn.pack(side=tk.LEFT)
+
+        # Debug button
+        debug_frame = ttk.Frame(self.frame)
+        debug_frame.pack(fill=tk.X, padx=5, pady=2)
+
+        self.debug_btn = ttk.Button(
+            debug_frame, text="Debug Transformation Data",
+            command=self.debug_transformation
+        )
+        self.debug_btn.pack(side=tk.LEFT)
 
         # Transformation status
         ttk.Separator(self.frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
@@ -189,7 +209,7 @@ class RouteTransformationPanel:
         self.current_bounds = bounds
 
         bounds_text = (f"Size: {bounds['width']:.1f}×{bounds['height']:.1f}mm, "
-                      f"Center: ({bounds['center_x']:.1f}, {bounds['center_y']:.1f})")
+                       f"Center: ({bounds['center_x']:.1f}, {bounds['center_y']:.1f})")
         self.bounds_info_var.set(bounds_text)
         self.bounds_status_label.config(foreground="blue")
 
@@ -202,7 +222,15 @@ class RouteTransformationPanel:
         reg_error = data.get('registration_error', 0.0)
         route_count = data.get('route_count', 0)
 
-        status_text = f"Registration transform applied to {route_count} routes (error: {reg_error:.3f}mm)"
+        source = data.get('source', 'unknown')
+        if source == 'orthogonal_transformation':
+            rotation_angle = data.get('rotation_angle_degrees', 0.0)
+            status_text = f"Orthogonal transform applied: {rotation_angle:.1f}° rotation, {route_count} routes"
+        elif source == 'registration_manager':
+            status_text = f"Registration matrix applied to {route_count} routes (error: {reg_error:.3f}mm)"
+        else:
+            status_text = f"Transformation applied to {route_count} routes"
+
         self.transformation_status_var.set(status_text)
         self.transform_status_label.config(foreground="green")
 
@@ -226,10 +254,16 @@ class RouteTransformationPanel:
             state=tk.NORMAL if self.routes_loaded else tk.DISABLED
         )
 
-        # Apply transform button - enabled when routes loaded and registration available
-        self.apply_transform_btn.config(
-            state=tk.NORMAL if (self.routes_loaded and self.registration_available and not self.transformation_applied) else tk.DISABLED
+        # Debug button - enabled when registration is available
+        self.debug_btn.config(
+            state=tk.NORMAL if self.registration_available else tk.DISABLED
         )
+
+        # Both transformation buttons - enabled when routes loaded and registration available
+        transform_enabled = self.routes_loaded and self.registration_available and not self.transformation_applied
+
+        self.apply_transform_btn.config(state=tk.NORMAL if transform_enabled else tk.DISABLED)
+        self.align_routes_btn.config(state=tk.NORMAL if transform_enabled else tk.DISABLED)
 
         # Revert button - enabled when transformation has been applied
         self.revert_transform_btn.config(
@@ -252,7 +286,8 @@ class RouteTransformationPanel:
             bounds = self.route_transformer.calculate_route_bounds(self.route_manager.routes)
 
             if bounds:
-                self.log(f"Route bounds: {bounds['width']:.1f}×{bounds['height']:.1f}mm at ({bounds['center_x']:.1f}, {bounds['center_y']:.1f})")
+                self.log(
+                    f"Route bounds: {bounds['width']:.1f}×{bounds['height']:.1f}mm at ({bounds['center_x']:.1f}, {bounds['center_y']:.1f})")
             else:
                 messagebox.showerror("Calculation Error", "Failed to calculate route bounds")
 
@@ -262,7 +297,7 @@ class RouteTransformationPanel:
             messagebox.showerror("Error", error_msg)
 
     def apply_registration_transformation(self):
-        """Apply registration transformation to loaded routes"""
+        """Apply registration transformation matrix to loaded routes"""
         try:
             if not self.routes_loaded:
                 messagebox.showwarning("No Routes", "No routes loaded to transform")
@@ -273,9 +308,9 @@ class RouteTransformationPanel:
                 return
 
             # Confirm action
-            if not messagebox.askyesno("Apply Transformation",
-                                     "Apply registration transformation to routes?\n"
-                                     "This will modify the route coordinates."):
+            if not messagebox.askyesno("Apply Matrix Transformation",
+                                       "Apply registration transformation matrix to routes?\n"
+                                       "This uses the computed transformation matrix from calibration."):
                 return
 
             # Get current routes
@@ -308,6 +343,151 @@ class RouteTransformationPanel:
             self.log(error_msg, "error")
             messagebox.showerror("Error", error_msg)
 
+    def apply_orthogonal_transformation(self):
+        """Apply orthogonal transformation to align routes with machine coordinate system"""
+        try:
+            if not self.routes_loaded:
+                messagebox.showwarning("No Routes", "No routes loaded to transform")
+                return
+
+            if not self.registration_available:
+                messagebox.showwarning("No Registration", "No registration data available")
+                return
+
+            # Confirm action
+            if not messagebox.askyesno("Apply Orthogonal Transform",
+                                       "Apply orthogonal transformation to routes?\n"
+                                       "This will rotate and align routes to machine coordinate axes\n"
+                                       "based on registration point orientation."):
+                return
+
+            # Get current routes
+            original_routes = self.route_manager.routes
+            if not original_routes:
+                messagebox.showerror("Error", "No route data available")
+                return
+
+            # Apply orthogonal transformation using transformer service
+            transformed_routes = self.route_transformer.calculate_orthogonal_transformation(
+                original_routes, self.registration_manager
+            )
+
+            if transformed_routes is not None:
+                # Update route manager with transformed routes
+                self.route_manager.routes = transformed_routes
+                self.route_manager.emit(RouteEvents.ROUTES_TRANSFORMED, {
+                    'source': 'orthogonal_transformation',
+                    'route_count': len(transformed_routes)
+                })
+
+                self.log("Orthogonal transformation applied to routes successfully")
+                messagebox.showinfo("Success", "Orthogonal transformation applied successfully!")
+
+            else:
+                messagebox.showerror("Transformation Failed", "Failed to apply orthogonal transformation")
+
+        except Exception as e:
+            error_msg = f"Failed to apply orthogonal transformation: {e}"
+            self.log(error_msg, "error")
+            messagebox.showerror("Error", error_msg)
+
+    def debug_transformation(self):
+        """Show debug information about transformation data"""
+        try:
+            if not self.registration_available:
+                messagebox.showwarning("No Registration", "No registration data to debug")
+                return
+
+            # Get debug information
+            debug_info = self.route_transformer.debug_transformation_data(self.registration_manager)
+
+            # Create debug window
+            debug_window = tk.Toplevel(self.frame)
+            debug_window.title("Transformation Debug Info")
+            debug_window.geometry("600x400")
+
+            # Add scrollable text widget
+            text_frame = ttk.Frame(debug_window)
+            text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+            text_widget = tk.Text(text_frame, wrap=tk.WORD)
+            scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
+            text_widget.configure(yscrollcommand=scrollbar.set)
+
+            text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            # Format debug information
+            debug_text = "TRANSFORMATION DEBUG INFORMATION\n"
+            debug_text += "=" * 50 + "\n\n"
+
+            debug_text += f"Registration Status: {'REGISTERED' if debug_info['is_registered'] else 'NOT REGISTERED'}\n"
+            debug_text += f"Calibration Points: {debug_info['point_count']}\n\n"
+
+            if debug_info['is_registered']:
+                debug_text += f"Registration Error: {debug_info['registration_error']:.4f} mm\n\n"
+
+                debug_text += "TRANSFORMATION MATRIX:\n"
+                if debug_info['transformation_matrix']:
+                    matrix = debug_info['transformation_matrix']
+                    for row in matrix:
+                        debug_text += f"  [{', '.join(f'{val:8.4f}' for val in row)}]\n"
+                debug_text += "\n"
+
+                debug_text += "TRANSLATION VECTOR:\n"
+                if debug_info['translation_vector']:
+                    vector = debug_info['translation_vector']
+                    debug_text += f"  [{', '.join(f'{val:8.4f}' for val in vector)}]\n\n"
+
+                debug_text += "MACHINE POSITIONS (Registration Points):\n"
+                for i, pos in enumerate(debug_info['machine_positions'], 1):
+                    debug_text += f"  Point {i}: ({pos[0]:8.3f}, {pos[1]:8.3f}, {pos[2]:8.3f})\n"
+                debug_text += "\n"
+
+                debug_text += "CAMERA POSITIONS:\n"
+                for i, pos in enumerate(debug_info['camera_positions'], 1):
+                    debug_text += f"  Point {i}: ({pos[0]:8.3f}, {pos[1]:8.3f}, {pos[2]:8.3f})\n"
+                debug_text += "\n"
+
+                if 'machine_bounds' in debug_info:
+                    mb = debug_info['machine_bounds']
+                    debug_text += "MACHINE COORDINATE BOUNDS:\n"
+                    debug_text += f"  X: {mb['x_min']:8.3f} to {mb['x_max']:8.3f} (center: {mb['center_x']:8.3f})\n"
+                    debug_text += f"  Y: {mb['y_min']:8.3f} to {mb['y_max']:8.3f} (center: {mb['center_y']:8.3f})\n\n"
+
+                if 'camera_bounds' in debug_info:
+                    cb = debug_info['camera_bounds']
+                    debug_text += "CAMERA COORDINATE BOUNDS:\n"
+                    debug_text += f"  X: {cb['x_min']:8.3f} to {cb['x_max']:8.3f} (center: {cb['center_x']:8.3f})\n"
+                    debug_text += f"  Y: {cb['y_min']:8.3f} to {cb['y_max']:8.3f} (center: {cb['center_y']:8.3f})\n\n"
+
+                # Add orthogonal transformation analysis
+                if 'orthogonal_analysis' in debug_info:
+                    oa = debug_info['orthogonal_analysis']
+                    debug_text += "ORTHOGONAL TRANSFORMATION ANALYSIS:\n"
+                    debug_text += f"  Registration Center: ({oa['registration_center'][0]:8.3f}, {oa['registration_center'][1]:8.3f})\n"
+                    debug_text += f"  Principal Axis: ({oa['principal_axis'][0]:8.4f}, {oa['principal_axis'][1]:8.4f})\n"
+                    debug_text += f"  Rotation Angle: {oa['rotation_angle_degrees']:8.2f}°\n"
+                    debug_text += f"  Variance Explained: {oa['variance_explained'] * 100:6.1f}%\n\n"
+
+            # Add route information if available
+            if hasattr(self, 'current_bounds') and self.current_bounds:
+                debug_text += "CURRENT ROUTE BOUNDS:\n"
+                rb = self.current_bounds
+                debug_text += f"  X: {rb['x_min']:8.3f} to {rb['x_max']:8.3f} (center: {rb['center_x']:8.3f})\n"
+                debug_text += f"  Y: {rb['y_min']:8.3f} to {rb['y_max']:8.3f} (center: {rb['center_y']:8.3f})\n"
+                debug_text += f"  Size: {rb['width']:8.3f} × {rb['height']:8.3f} mm\n"
+
+            text_widget.insert(tk.END, debug_text)
+            text_widget.config(state=tk.DISABLED)
+
+            self.log("Debug information displayed")
+
+        except Exception as e:
+            error_msg = f"Failed to show debug information: {e}"
+            self.log(error_msg, "error")
+            messagebox.showerror("Error", error_msg)
+
     def revert_to_original(self):
         """Revert routes to their original state"""
         try:
@@ -317,8 +497,8 @@ class RouteTransformationPanel:
 
             # Confirm action
             if not messagebox.askyesno("Revert Transformation",
-                                     "Revert routes to original coordinates?\n"
-                                     "This will undo the transformation."):
+                                       "Revert routes to original coordinates?\n"
+                                       "This will undo the transformation."):
                 return
 
             # Reload routes from original file
