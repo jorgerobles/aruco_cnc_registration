@@ -393,7 +393,7 @@ class MachineAreaCanvas:
                     canvas_points.extend([canvas_x, canvas_y])
 
             if len(canvas_points) >= 4:
-                self.canvas.create_line(*canvas_points, fill=color, width=2, smooth=True)
+                self.canvas.create_line(*canvas_points, fill=color, width=2, smooth=False)
 
                 # Draw start point (green)
                 start_x, start_y = canvas_points[0], canvas_points[1]

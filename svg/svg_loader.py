@@ -90,7 +90,51 @@ def convert_paths(path, num_points=50, angle_threshold=5):
     return points
 
 
-def svg_to_routes(svg_file, angle_threshold=5):
+def _is_element_hidden(element, skip_display_none=True):
+    """
+    Check if an SVG element should be skipped based on display attributes.
+    Checks the element and all its parent elements for display:none.
+
+    Args:
+        element: SVG DOM element
+        skip_display_none: Whether to skip elements with display:none
+
+    Returns:
+        True if element should be skipped, False otherwise
+    """
+    if not skip_display_none:
+        return False
+
+    current = element
+    while current and current.nodeType == current.ELEMENT_NODE:
+        # Check for display:none in style attribute
+        style = current.getAttribute('style') if current.hasAttribute('style') else ''
+        if 'display:none' in style.replace(' ', ''):
+            return True
+
+        # Check for direct display attribute
+        display = current.getAttribute('display') if current.hasAttribute('display') else ''
+        if display.strip() == 'none':
+            return True
+
+        # Move to parent element
+        current = current.parentNode
+
+    return False
+
+
+def svg_to_routes(svg_file, angle_threshold=5, skip_display_none=True):
+    """
+    Convert SVG file to routes (list of point lists).
+
+    Args:
+        svg_file: Path to SVG file
+        angle_threshold: Angle threshold for path conversion
+        skip_display_none: If True, skip elements with display:none (default: True)
+
+    Returns:
+        List of routes, where each route is a list of (x, y) points
+    """
     # Leer el SVG original para extraer viewBox, width y height
     doc = minidom.parse(svg_file)
     svg_tag = doc.getElementsByTagName('svg')[0]
@@ -110,11 +154,29 @@ def svg_to_routes(svg_file, angle_threshold=5):
     scale_x = width / vb_width
     scale_y = height / vb_height
 
-    # Extraer paths
+    # Get all path elements from DOM to check visibility
+    path_elements = doc.getElementsByTagName('path')
+    visible_path_elements = []
+
+    if skip_display_none:
+        for path_elem in path_elements:
+            if not _is_element_hidden(path_elem, skip_display_none):
+                visible_path_elements.append(path_elem)
+    else:
+        visible_path_elements = path_elements
+
+    # Extract paths using svg2paths2
     paths, attributes, svg_attributes = svg2paths2(svg_file)
 
+    # Filter paths to only include visible ones
     routes = []
-    for path in paths:
+    for i, path in enumerate(paths):
+        # If we're skipping hidden elements, we need to match this path with DOM elements
+        if skip_display_none and i < len(path_elements):
+            path_elem = path_elements[i]
+            if _is_element_hidden(path_elem, skip_display_none):
+                continue
+
         points_raw = convert_paths(path, angle_threshold=angle_threshold)
 
         # Aplicar escala + traslación desde viewBox

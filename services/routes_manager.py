@@ -23,7 +23,8 @@ class RouteEvents:
 class RouteManager:
     """Centralized routes management service"""
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, skip_display_none=True):
+        self.skip_display_none = skip_display_none
         self.logger = logger
 
         # Route data
@@ -53,7 +54,7 @@ class RouteManager:
             self.log(f"Loading routes from SVG: {svg_file}")
 
             # Use your existing svg_loader
-            routes = svg_to_routes(svg_file, angle_threshold)
+            routes = svg_to_routes(svg_file, angle_threshold,self.skip_display_none)
 
             if not routes:
                 self.log("No routes found in SVG file", "warning")

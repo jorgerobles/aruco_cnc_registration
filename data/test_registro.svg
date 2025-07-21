@@ -3,7 +3,7 @@
 
 <svg
    version="1.1"
-      width="210mm"
+   width="210mm"
    height="297mm"
    id="Capa_1"
    x="0px"
@@ -11,28 +11,38 @@
    viewBox="0 0 595.276 841.89"
    enable-background="new 0 0 595.276 841.89"
    xml:space="preserve"
+   sodipodi:docname="test_registro.svg"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
-   xmlns:svg="http://www.w3.org/2000/svg"><defs
-   id="defs82" />
-<g
-   id="g63">
-	<polygon
-   fill="#020203"
-   points="63.78,53.15 63.78,49.606 56.693,49.606 56.693,56.693 63.78,56.693  "
-   id="polygon59" />
-	<path
-   fill="#020203"
-   d="M35.433,35.433v42.52h42.52v-42.52H35.433z M70.866,49.606v3.543v3.543v3.543v3.543h-3.543H63.78v3.543   v3.543h-7.087v-3.543V63.78v-7.087h-7.087v-7.087H42.52V42.52h7.087v7.087h7.087V42.52h7.087h3.543h3.543V49.606z"
-   id="path61" />
-</g>
-<path
-   fill="#020203"
-   d="M35.433,758.268v42.52h42.52v-42.52H35.433z M70.866,779.528v3.543v3.543H63.78v7.087h-7.087v-7.087h7.087  v-3.543v-3.543h-3.543h-3.543H53.15h-3.543v3.543v3.543v3.543v3.543H42.52v-3.543v-3.543v-3.543v-3.543v-7.087h7.087h3.543h3.543  h3.543h3.543h3.543h3.543V779.528z"
-   id="path65" />
-<path
-   fill="#020203"
-   d="M503.15,35.433v42.52h42.52v-42.52H503.15z M538.583,49.606v3.543v3.543h-3.543h-3.543v3.543v3.543h7.087  v7.087h-7.087V63.78h-7.087v7.087h-3.543h-3.543h-7.087V63.78h7.087h3.543h3.543v-3.543v-3.543V53.15v-3.543V42.52h7.087h3.543  h3.543V49.606z"
-   id="path67" />
+   xmlns:svg="http://www.w3.org/2000/svg"><sodipodi:namedview
+   id="namedview14"
+   pagecolor="#ffffff"
+   bordercolor="#000000"
+   borderopacity="0.25"
+   inkscape:showpageshadow="2"
+   inkscape:pageopacity="0.0"
+   inkscape:pagecheckerboard="0"
+   inkscape:deskcolor="#d1d1d1"
+   inkscape:document-units="mm"
+   showgrid="false"
+   inkscape:zoom="1.9566757"
+   inkscape:cx="515.41499"
+   inkscape:cy="256.55758"
+   inkscape:window-width="2560"
+   inkscape:window-height="1528"
+   inkscape:window-x="0"
+   inkscape:window-y="0"
+   inkscape:window-maximized="1"
+   inkscape:current-layer="layer2" /><defs
+   id="defs82">
+	
+	
+</defs>
+
+
+
 <rect
    x="123.08"
    y="121.674"
@@ -74,4 +84,40 @@
    cy="373.622"
    r="42.52"
    id="circle77" />
-</svg>
+<g
+   inkscape:groupmode="layer"
+   id="layer1"
+   inkscape:label="aruco"
+   style="display:none"><path
+     id="path61"
+     d="m 35.433,35.433 v 42.52 h 42.52 v -42.52 z m 35.433,14.173 v 3.543 3.543 3.543 3.543 H 67.323 63.78 v 3.543 3.543 H 56.693 V 67.321 63.78 56.693 H 49.606 V 49.606 H 42.52 V 42.52 h 7.087 v 7.087 h 7.087 V 42.52 h 7.087 3.543 3.543 v 7.086 z m -14.173,0 v 7.087 H 63.78 V 53.15 49.606 Z"
+     style="fill:#ff00ff" /><path
+     fill="#020203"
+     d="m 35.433,758.268 v 42.52 h 42.52 v -42.52 z m 35.433,21.26 v 3.543 3.543 H 63.78 v 7.087 h -7.087 v -7.087 h 7.087 v -3.543 -3.543 H 60.237 56.694 53.15 49.607 v 3.543 3.543 3.543 3.543 H 42.52 v -3.543 -3.543 -3.543 -3.543 -7.087 h 7.087 3.543 3.543 3.543 3.543 3.543 3.543 v 7.087 z"
+     id="path65"
+     style="fill:#ff00ff" /><path
+     fill="#020203"
+     d="m 503.15,35.433 v 42.52 h 42.52 v -42.52 z m 35.433,14.173 v 3.543 3.543 h -3.543 -3.543 v 3.543 3.543 h 7.087 v 7.087 h -7.087 V 63.78 h -7.087 v 7.087 h -3.543 -3.543 -7.087 V 63.78 h 7.087 3.543 3.543 V 60.237 56.694 53.15 49.607 42.52 h 7.087 3.543 3.543 z"
+     id="path67"
+     style="fill:#ff00ff" /></g><g
+   inkscape:groupmode="layer"
+   id="layer2"
+   inkscape:label="bounds"><rect
+     style="fill:none;stroke:#00ff00;stroke-width:0.75"
+     id="rect172"
+     width="21.259853"
+     height="21.259853"
+     x="56.318146"
+     y="56.318146" /><rect
+     style="fill:none;stroke:#00ff00;stroke-width:0.75"
+     id="rect172-3"
+     width="21.259853"
+     height="21.259853"
+     x="56.318146"
+     y="758.64301" /><rect
+     style="fill:none;stroke:#00ff00;stroke-width:0.75"
+     id="rect172-6"
+     width="21.259853"
+     height="21.259853"
+     x="503.15015"
+     y="56.693573" /></g></svg>
