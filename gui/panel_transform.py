@@ -1,519 +1,562 @@
 """
-Route Transformation Panel
-GUI for applying rigid transformations to loaded SVG routes using registration data
+Route Transformation Panel - Completely Rewritten
+Clean implementation using intermediate RouteTransformationService
+Follows SOLID principles with proper separation of concerns
 """
 
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Callable, Optional
+from typing import Optional, Callable
 
 from services.event_broker import event_aware, event_handler, EventPriority
 from services.routes_manager import RouteEvents
 from services.registration_manager import RegistrationEvents
-from services.route_transformer import RouteTransformer, RouteTransformerEvents
+from services.route_transformation_service import RouteTransformationService, RouteTransformationEvents
 
 
 @event_aware()
 class RouteTransformationPanel:
-    """Panel for applying registration-based transformations to routes"""
+    """
+    GUI Panel for route transformations using intermediate service
+    Handles only UI concerns and delegates business logic to service
+    """
 
     def __init__(self, parent, route_manager, registration_manager, logger: Optional[Callable] = None):
         self.route_manager = route_manager
         self.registration_manager = registration_manager
-        self.route_transformer = RouteTransformer(logger)
+        self.transformation_service = RouteTransformationService(logger)
         self.logger = logger
 
-        # Create frame
+        # UI State
+        self.routes_available = False
+        self.registration_available = False
+        self.bounds_calculated = False
+        self.transformation_applied = False
+
+        # Current data
+        self.current_bounds = None
+        self.original_routes = None
+        self.transformed_routes = None
+
+        # Create main frame
         self.frame = ttk.LabelFrame(parent, text="Route Transformation")
         self.frame.pack(fill=tk.X, pady=5, padx=5)
 
-        # State tracking
-        self.routes_loaded = False
-        self.registration_available = False
-        self.transformation_applied = False
-        self.current_bounds = None
-        self.transformed_bounds = None
+        # UI Variables
+        self.routes_status_var = tk.StringVar(value="No routes loaded")
+        self.registration_status_var = tk.StringVar(value="No registration computed")
+        self.bounds_status_var = tk.StringVar(value="No bounds calculated")
+        self.transform_status_var = tk.StringVar(value="Ready for transformation")
 
-        # Variables
-        self.route_status_var = tk.StringVar(value="No routes loaded")
-        self.registration_status_var = tk.StringVar(value="No registration")
-        self.bounds_info_var = tk.StringVar(value="No bounds calculated")
-        self.transformation_status_var = tk.StringVar(value="No transformation applied")
-
-        self._setup_widgets()
-        self._update_ui_state()
-
-        # Initialize state from managers
+        self._create_widgets()
         self._check_initial_state()
+        self._update_ui_state()
 
         self.log("Route Transformation Panel initialized")
 
     def log(self, message: str, level: str = "info"):
         """Log message if logger is available"""
         if self.logger:
-            self.logger(f"[RouteTransformPanel] {message}", level)
+            self.logger(f"[TransformPanel] {message}", level)
+
+    def _create_widgets(self):
+        """Create all UI widgets"""
+        # Status Section
+        status_frame = ttk.LabelFrame(self.frame, text="Status")
+        status_frame.pack(fill=tk.X, pady=5, padx=5)
+
+        # Routes status
+        ttk.Label(status_frame, text="Routes:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        self.routes_status_label = ttk.Label(status_frame, textvariable=self.routes_status_var, foreground="gray")
+        self.routes_status_label.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+
+        # Registration status
+        ttk.Label(status_frame, text="Registration:").grid(row=1, column=0, sticky=tk.W, padx=5, pady=2)
+        self.registration_status_label = ttk.Label(status_frame, textvariable=self.registration_status_var, foreground="gray")
+        self.registration_status_label.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+
+        # Bounds status
+        ttk.Label(status_frame, text="Bounds:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        self.bounds_status_label = ttk.Label(status_frame, textvariable=self.bounds_status_var, foreground="gray")
+        self.bounds_status_label.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
+
+        # Transform status
+        ttk.Label(status_frame, text="Transform:").grid(row=3, column=0, sticky=tk.W, padx=5, pady=2)
+        self.transform_status_label = ttk.Label(status_frame, textvariable=self.transform_status_var, foreground="blue")
+        self.transform_status_label.grid(row=3, column=1, sticky=tk.W, padx=5, pady=2)
+
+        # Actions Section
+        actions_frame = ttk.LabelFrame(self.frame, text="Actions")
+        actions_frame.pack(fill=tk.X, pady=5, padx=5)
+
+        # Button row 1: Analysis
+        btn_row1 = ttk.Frame(actions_frame)
+        btn_row1.pack(fill=tk.X, pady=2)
+
+        self.calculate_bounds_btn = ttk.Button(btn_row1, text="Calculate Bounds",
+                                             command=self.calculate_bounds)
+        self.calculate_bounds_btn.pack(side=tk.LEFT, padx=2)
+
+        self.show_statistics_btn = ttk.Button(btn_row1, text="Show Statistics",
+                                            command=self.show_statistics)
+        self.show_statistics_btn.pack(side=tk.LEFT, padx=2)
+
+        # Button row 2: Transformation
+        btn_row2 = ttk.Frame(actions_frame)
+        btn_row2.pack(fill=tk.X, pady=2)
+
+        self.apply_registration_btn = ttk.Button(btn_row2, text="Apply Registration Transform",
+                                               command=self.apply_registration_transformation)
+        self.apply_registration_btn.pack(side=tk.LEFT, padx=2)
+
+        self.manual_transform_btn = ttk.Button(btn_row2, text="Manual Transform",
+                                             command=self.show_manual_transform_dialog)
+        self.manual_transform_btn.pack(side=tk.LEFT, padx=2)
+
+        # Button row 3: Utilities
+        btn_row3 = ttk.Frame(actions_frame)
+        btn_row3.pack(fill=tk.X, pady=2)
+
+        self.revert_btn = ttk.Button(btn_row3, text="Revert Transform",
+                                   command=self.revert_transformation)
+        self.revert_btn.pack(side=tk.LEFT, padx=2)
+
+        self.clear_btn = ttk.Button(btn_row3, text="Clear All",
+                                  command=self.clear_all)
+        self.clear_btn.pack(side=tk.LEFT, padx=2)
 
     def _check_initial_state(self):
         """Check initial state of routes and registration"""
-        # Check if routes are already loaded
+        # Check routes
         if hasattr(self.route_manager, 'is_loaded') and self.route_manager.is_loaded():
-            self.routes_loaded = True
-            route_info = self.route_manager.get_route_info()
-            route_count = route_info.get('route_count', 0)
-            self.route_status_var.set(f"{route_count} routes loaded")
-            self.calculate_route_bounds()
+            self.routes_available = True
+            route_count = self.route_manager.get_routes_count()
+            self.routes_status_var.set(f"{route_count} routes loaded")
+            self.routes_status_label.config(foreground="green")
+            self.log(f"Found {route_count} routes already loaded")
 
-        # Check if registration is available
-        if self.registration_manager.is_registered():
+        # Check registration
+        if hasattr(self.registration_manager, 'is_registered') and self.registration_manager.is_registered():
             self.registration_available = True
             point_count = self.registration_manager.get_calibration_points_count()
             error = self.registration_manager.get_registration_error() or 0.0
             self.registration_status_var.set(f"Registered ({point_count} points, error: {error:.3f}mm)")
+            self.registration_status_label.config(foreground="green")
+            self.log(f"Found registration with {point_count} points, error: {error:.3f}mm")
 
-        self._update_ui_state()
-
-    def _setup_widgets(self):
-        """Setup the panel widgets"""
-
-        # Status section
-        status_frame = ttk.Frame(self.frame)
-        status_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        # Routes status
-        ttk.Label(status_frame, text="Routes:").grid(row=0, column=0, sticky=tk.W, padx=(0,5))
-        self.routes_status_label = ttk.Label(status_frame, textvariable=self.route_status_var, foreground="gray")
-        self.routes_status_label.grid(row=0, column=1, sticky=tk.W)
-
-        # Registration status
-        ttk.Label(status_frame, text="Registration:").grid(row=1, column=0, sticky=tk.W, padx=(0,5))
-        self.reg_status_label = ttk.Label(status_frame, textvariable=self.registration_status_var, foreground="gray")
-        self.reg_status_label.grid(row=1, column=1, sticky=tk.W)
-
-        # Bounds info
-        ttk.Label(status_frame, text="Bounds:").grid(row=2, column=0, sticky=tk.W, padx=(0,5))
-        self.bounds_status_label = ttk.Label(status_frame, textvariable=self.bounds_info_var, foreground="gray")
-        self.bounds_status_label.grid(row=2, column=1, sticky=tk.W)
-
-        ttk.Separator(self.frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-
-        # Action buttons
-        button_frame = ttk.Frame(self.frame)
-        button_frame.pack(fill=tk.X, padx=5)
-
-        self.calculate_bounds_btn = ttk.Button(
-            button_frame, text="Calculate Route Bounds",
-            command=self.calculate_route_bounds
-        )
-        self.calculate_bounds_btn.pack(side=tk.LEFT, padx=(0,5))
-
-        # Two transformation options
-        transform_options_frame = ttk.Frame(self.frame)
-        transform_options_frame.pack(fill=tk.X, padx=5, pady=5)
-
-        self.apply_transform_btn = ttk.Button(
-            transform_options_frame, text="Apply Registration Matrix",
-            command=self.apply_registration_transformation
-        )
-        self.apply_transform_btn.pack(side=tk.LEFT, padx=(0,5))
-
-        self.align_routes_btn = ttk.Button(
-            transform_options_frame, text="Simple Alignment",
-            command=self.apply_simple_alignment_transformation
-        )
-        self.align_routes_btn.pack(side=tk.LEFT, padx=(0,5))
-
-        self.revert_transform_btn = ttk.Button(
-            transform_options_frame, text="Revert to Original",
-            command=self.revert_to_original
-        )
-        self.revert_transform_btn.pack(side=tk.LEFT)
-
-        # Debug button
-        debug_frame = ttk.Frame(self.frame)
-        debug_frame.pack(fill=tk.X, padx=5, pady=2)
-
-        self.debug_btn = ttk.Button(
-            debug_frame, text="Debug Transformation Data",
-            command=self.debug_transformation
-        )
-        self.debug_btn.pack(side=tk.LEFT)
-
-        # Transformation status
-        ttk.Separator(self.frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-
-        status_label = ttk.Label(self.frame, text="Transform Status:")
-        status_label.pack(anchor=tk.W, padx=5)
-
-        self.transform_status_label = ttk.Label(
-            self.frame, textvariable=self.transformation_status_var,
-            foreground="gray", wraplength=400
-        )
-        self.transform_status_label.pack(anchor=tk.W, padx=15)
-
-    # Event handlers for route and registration state changes
-
+    # Event Handlers for Route Manager
     @event_handler(RouteEvents.ROUTES_LOADED, EventPriority.HIGH)
     def _on_routes_loaded(self, data: dict):
         """Handle routes loaded event"""
-        self.routes_loaded = True
+        self.routes_available = True
         self.transformation_applied = False
+        self.bounds_calculated = False
+
         route_count = data.get('route_count', 0)
-        self.route_status_var.set(f"{route_count} routes loaded")
+        self.routes_status_var.set(f"{route_count} routes loaded")
         self.routes_status_label.config(foreground="green")
+
+        self.bounds_status_var.set("Bounds not calculated")
+        self.bounds_status_label.config(foreground="gray")
+
+        self.transform_status_var.set("Ready for transformation")
+        self.transform_status_label.config(foreground="blue")
+
         self.log(f"Routes loaded: {route_count} routes")
         self._update_ui_state()
-
-        # Auto-calculate bounds when routes are loaded
-        self.calculate_route_bounds()
 
     @event_handler(RouteEvents.ROUTES_CLEARED, EventPriority.HIGH)
     def _on_routes_cleared(self):
         """Handle routes cleared event"""
-        self.routes_loaded = False
+        self.routes_available = False
         self.transformation_applied = False
+        self.bounds_calculated = False
         self.current_bounds = None
-        self.transformed_bounds = None
-        self.route_status_var.set("No routes loaded")
+
+        self.routes_status_var.set("No routes loaded")
         self.routes_status_label.config(foreground="gray")
-        self.bounds_info_var.set("No bounds calculated")
+
+        self.bounds_status_var.set("No bounds calculated")
         self.bounds_status_label.config(foreground="gray")
-        self.transformation_status_var.set("No transformation applied")
+
+        self.transform_status_var.set("No routes to transform")
         self.transform_status_label.config(foreground="gray")
+
         self.log("Routes cleared")
         self._update_ui_state()
 
+    # Event Handlers for Registration Manager
     @event_handler(RegistrationEvents.COMPUTED, EventPriority.HIGH)
     def _on_registration_computed(self, data: dict):
         """Handle registration computed event"""
         self.registration_available = True
-        error = data.get('error', 0.0)
+
         point_count = data.get('point_count', 0)
+        error = data.get('error', 0.0)
         self.registration_status_var.set(f"Registered ({point_count} points, error: {error:.3f}mm)")
-        self.reg_status_label.config(foreground="green")
-        self.log(f"Registration available: {point_count} points, error: {error:.3f}mm")
+        self.registration_status_label.config(foreground="green")
+
+        self.log(f"Registration computed: {point_count} points, error: {error:.3f}mm")
         self._update_ui_state()
 
     @event_handler(RegistrationEvents.CLEARED, EventPriority.HIGH)
     def _on_registration_cleared(self, data: dict):
         """Handle registration cleared event"""
         self.registration_available = False
-        self.registration_status_var.set("No registration")
-        self.reg_status_label.config(foreground="gray")
+
+        self.registration_status_var.set("No registration computed")
+        self.registration_status_label.config(foreground="gray")
+
         self.log("Registration cleared")
         self._update_ui_state()
 
-    @event_handler(RouteTransformerEvents.BOUNDS_CALCULATED)
+    # Event Handlers for Transformation Service
+    @event_handler(RouteTransformationEvents.BOUNDS_CALCULATED, EventPriority.HIGH)
     def _on_bounds_calculated(self, data: dict):
         """Handle bounds calculated event"""
-        bounds = data['bounds']
-        self.current_bounds = bounds
+        self.bounds_calculated = True
+        self.current_bounds = data['bounds']
 
+        bounds = self.current_bounds
         bounds_text = (f"Size: {bounds['width']:.1f}×{bounds['height']:.1f}mm, "
                       f"Center: ({bounds['center_x']:.1f}, {bounds['center_y']:.1f})")
-        self.bounds_info_var.set(bounds_text)
+
+        self.bounds_status_var.set(bounds_text)
         self.bounds_status_label.config(foreground="blue")
 
-        self.log(f"Route bounds calculated: {bounds_text}")
+        self.log(f"Bounds calculated: {bounds_text}")
+        self._update_ui_state()
 
-    @event_handler(RouteTransformerEvents.TRANSFORMATION_APPLIED)
+    @event_handler(RouteTransformationEvents.TRANSFORMATION_APPLIED, EventPriority.HIGH)
     def _on_transformation_applied(self, data: dict):
         """Handle transformation applied event"""
         self.transformation_applied = True
-        reg_error = data.get('registration_error', 0.0)
-        route_count = data.get('route_count', 0)
 
         source = data.get('source', 'unknown')
-        if source == 'simple_alignment_transformation':
-            status_text = f"Simple alignment applied to {route_count} routes (centered on registration area)"
-        elif source == 'registration_manager':
-            status_text = f"Registration matrix applied to {route_count} routes (error: {reg_error:.3f}mm)"
+        route_count = data.get('route_count', 0)
+        reg_error = data.get('registration_error', 0.0)
+
+        if source == 'registration_transformation':
+            status_text = f"Registration transform applied ({route_count} routes, error: {reg_error:.3f}mm)"
+        elif source == 'manual_transformation':
+            status_text = f"Manual transform applied ({route_count} routes)"
         else:
-            status_text = f"Transformation applied to {route_count} routes"
+            status_text = f"Transform applied ({route_count} routes)"
 
-        self.transformation_status_var.set(status_text)
+        self.transform_status_var.set(status_text)
         self.transform_status_label.config(foreground="green")
-
-        # Store transformed bounds
-        self.transformed_bounds = data.get('transformed_bounds')
 
         self.log(f"Transformation applied: {status_text}")
         self._update_ui_state()
 
-    @event_handler(RouteTransformerEvents.ERROR)
-    def _on_transformer_error(self, error_message: str):
-        """Handle route transformer errors"""
-        self.transformation_status_var.set(f"Error: {error_message}")
+    @event_handler(RouteTransformationEvents.ERROR, EventPriority.HIGH)
+    def _on_transformation_error(self, error_message: str):
+        """Handle transformation service errors"""
+        self.transform_status_var.set(f"Error: {error_message}")
         self.transform_status_label.config(foreground="red")
-        self.log(f"Route transformer error: {error_message}", "error")
+
+        self.log(f"Transformation error: {error_message}", "error")
+        messagebox.showerror("Transformation Error", error_message)
 
     def _update_ui_state(self):
-        """Update UI button states based on current state"""
-        # Calculate bounds button - enabled when routes are loaded
-        self.calculate_bounds_btn.config(
-            state=tk.NORMAL if self.routes_loaded else tk.DISABLED
-        )
+        """Update button states based on current state"""
+        # Calculate bounds - enabled when routes available
+        self.calculate_bounds_btn.config(state=tk.NORMAL if self.routes_available else tk.DISABLED)
 
-        # Debug button - enabled when registration is available
-        self.debug_btn.config(
-            state=tk.NORMAL if self.registration_available else tk.DISABLED
-        )
+        # Show statistics - enabled when routes available
+        self.show_statistics_btn.config(state=tk.NORMAL if self.routes_available else tk.DISABLED)
 
-        # Both transformation buttons - enabled when routes loaded and registration available
-        transform_enabled = self.routes_loaded and self.registration_available and not self.transformation_applied
+        # Registration transform - enabled when both routes and registration available, not already transformed
+        reg_transform_enabled = (self.routes_available and
+                                self.registration_available and
+                                not self.transformation_applied)
+        self.apply_registration_btn.config(state=tk.NORMAL if reg_transform_enabled else tk.DISABLED)
 
-        self.apply_transform_btn.config(state=tk.NORMAL if transform_enabled else tk.DISABLED)
-        self.align_routes_btn.config(state=tk.NORMAL if transform_enabled else tk.DISABLED)
+        # Manual transform - enabled when routes available, not already transformed
+        manual_transform_enabled = self.routes_available and not self.transformation_applied
+        self.manual_transform_btn.config(state=tk.NORMAL if manual_transform_enabled else tk.DISABLED)
 
-        # Revert button - enabled when transformation has been applied
-        self.revert_transform_btn.config(
-            state=tk.NORMAL if self.transformation_applied else tk.DISABLED
-        )
+        # Revert - enabled when transformation applied
+        self.revert_btn.config(state=tk.NORMAL if self.transformation_applied else tk.DISABLED)
 
-    def calculate_route_bounds(self):
+        # Clear - always enabled
+        self.clear_btn.config(state=tk.NORMAL)
+
+    # Action Methods
+    def calculate_bounds(self):
         """Calculate and display route bounds"""
         try:
-            if not self.routes_loaded:
+            if not self.routes_available:
                 messagebox.showwarning("No Routes", "No routes loaded to calculate bounds for")
                 return
 
-            # Get routes from route manager
-            if not hasattr(self.route_manager, 'routes') or not self.route_manager.routes:
-                messagebox.showwarning("No Routes", "No route data available")
+            routes = self.route_manager.get_routes()
+            if not routes:
+                messagebox.showerror("No Data", "No route data available")
                 return
 
-            # Calculate bounds using transformer service
-            bounds = self.route_transformer.calculate_route_bounds(self.route_manager.routes)
+            # Use service to calculate bounds (will emit event)
+            bounds = self.transformation_service.calculate_route_bounds(routes)
 
-            if bounds:
-                self.log(f"Route bounds: {bounds['width']:.1f}×{bounds['height']:.1f}mm at ({bounds['center_x']:.1f}, {bounds['center_y']:.1f})")
-            else:
-                messagebox.showerror("Calculation Error", "Failed to calculate route bounds")
+            if not bounds:
+                messagebox.showerror("Calculation Failed", "Could not calculate route bounds")
 
         except Exception as e:
-            error_msg = f"Failed to calculate route bounds: {e}"
+            error_msg = f"Failed to calculate bounds: {e}"
+            self.log(error_msg, "error")
+            messagebox.showerror("Error", error_msg)
+
+    def show_statistics(self):
+        """Show detailed route statistics"""
+        try:
+            if not self.routes_available:
+                messagebox.showwarning("No Routes", "No routes loaded")
+                return
+
+            routes = self.route_manager.get_routes()
+            if not routes:
+                messagebox.showerror("No Data", "No route data available")
+                return
+
+            # Get statistics from service
+            stats = self.transformation_service.get_route_statistics(routes)
+
+            if 'error' in stats:
+                messagebox.showerror("Statistics Error", stats['error'])
+                return
+
+            # Format statistics message
+            stats_msg = (
+                f"Route Statistics:\n\n"
+                f"• Routes: {stats['route_count']}\n"
+                f"• Total Points: {stats['total_points']}\n"
+                f"• Total Length: {stats['total_length']:.2f}mm\n"
+                f"• Average Route Length: {stats['average_route_length']:.2f}mm\n"
+            )
+
+            if stats['bounds']:
+                bounds = stats['bounds']
+                stats_msg += (
+                    f"\nBounds:\n"
+                    f"• Size: {bounds['width']:.1f} × {bounds['height']:.1f}mm\n"
+                    f"• Center: ({bounds['center_x']:.1f}, {bounds['center_y']:.1f})\n"
+                    f"• Range: X[{bounds['x_min']:.1f}, {bounds['x_max']:.1f}] "
+                    f"Y[{bounds['y_min']:.1f}, {bounds['y_max']:.1f}]"
+                )
+
+            messagebox.showinfo("Route Statistics", stats_msg)
+
+        except Exception as e:
+            error_msg = f"Failed to get statistics: {e}"
             self.log(error_msg, "error")
             messagebox.showerror("Error", error_msg)
 
     def apply_registration_transformation(self):
-        """Apply registration transformation matrix to loaded routes"""
+        """Apply registration-based transformation"""
         try:
-            if not self.routes_loaded:
+            if not self.routes_available:
                 messagebox.showwarning("No Routes", "No routes loaded to transform")
                 return
 
             if not self.registration_available:
-                messagebox.showwarning("No Registration", "No registration data available")
+                messagebox.showwarning("No Registration", "No registration computed")
                 return
 
-            # Confirm action
-            if not messagebox.askyesno("Apply Matrix Transformation",
-                                     "Apply registration transformation matrix to routes?\n"
-                                     "This uses the computed transformation matrix from calibration."):
+            # Confirm transformation
+            if not messagebox.askyesno("Apply Registration Transform",
+                                     "Apply registration-based transformation to routes?\n"
+                                     "This will transform routes using the computed camera-to-machine registration."):
                 return
 
-            # Get current routes
-            original_routes = self.route_manager.routes
-            if not original_routes:
-                messagebox.showerror("Error", "No route data available")
-                return
+            # Store original routes for potential revert
+            self.original_routes = self.route_manager.get_routes()
 
-            # Apply transformation using transformer service
-            transformed_routes = self.route_transformer.apply_registration_transformation(
-                original_routes, self.registration_manager
-            )
+            # Apply transformation using service
+            transformed_routes = self.transformation_service.apply_registration_transformation(
+                self.original_routes, self.registration_manager)
 
-            if transformed_routes is not None:
+            if transformed_routes:
                 # Update route manager with transformed routes
                 self.route_manager.routes = transformed_routes
+                self.transformed_routes = transformed_routes
+
+                # Emit routes transformed event
                 self.route_manager.emit(RouteEvents.ROUTES_TRANSFORMED, {
                     'source': 'registration_transformation',
                     'route_count': len(transformed_routes)
                 })
 
-                self.log("Registration transformation applied to routes successfully")
                 messagebox.showinfo("Success", "Registration transformation applied successfully!")
-
             else:
-                messagebox.showerror("Transformation Failed", "Failed to apply registration transformation")
+                messagebox.showerror("Transformation Failed", "Could not apply registration transformation")
 
         except Exception as e:
             error_msg = f"Failed to apply registration transformation: {e}"
             self.log(error_msg, "error")
             messagebox.showerror("Error", error_msg)
 
-    def apply_simple_alignment_transformation(self):
-        """Apply simple alignment transformation to center routes on registration area"""
+    def show_manual_transform_dialog(self):
+        """Show dialog for manual transformation with 3 destination points"""
         try:
-            if not self.routes_loaded:
+            if not self.routes_available:
                 messagebox.showwarning("No Routes", "No routes loaded to transform")
                 return
 
-            if not self.registration_available:
-                messagebox.showwarning("No Registration", "No registration data available")
-                return
+            # Create dialog
+            dialog = tk.Toplevel(self.frame)
+            dialog.title("Manual Transformation")
+            dialog.geometry("400x250")
+            dialog.transient(self.frame.winfo_toplevel())
+            dialog.grab_set()
 
-            # Confirm action
-            if not messagebox.askyesno("Apply Simple Alignment",
-                                     "Apply simple alignment transformation to routes?\n"
-                                     "This will center the routes on the registration area."):
-                return
+            # Instructions
+            ttk.Label(dialog, text="Enter 3 destination points for transformation:",
+                     font=('Arial', 10, 'bold')).pack(pady=10)
 
-            # Get current routes
-            original_routes = self.route_manager.routes
-            if not original_routes:
-                messagebox.showerror("Error", "No route data available")
-                return
+            ttk.Label(dialog, text="Points should form a triangle in machine coordinates (mm)",
+                     font=('Arial', 9)).pack(pady=5)
 
-            # Apply simple alignment transformation using transformer service
-            transformed_routes = self.route_transformer.calculate_simple_alignment_transformation(
-                original_routes, self.registration_manager
-            )
+            # Point entry frame
+            points_frame = ttk.Frame(dialog)
+            points_frame.pack(pady=10)
 
-            if transformed_routes is not None:
-                # Update route manager with transformed routes
-                self.route_manager.routes = transformed_routes
-                self.route_manager.emit(RouteEvents.ROUTES_TRANSFORMED, {
-                    'source': 'simple_alignment_transformation',
-                    'route_count': len(transformed_routes)
-                })
+            # Create entry fields for 3 points
+            point_vars = []
+            for i in range(3):
+                row_frame = ttk.Frame(points_frame)
+                row_frame.pack(pady=2)
 
-                self.log("Simple alignment transformation applied to routes successfully")
-                messagebox.showinfo("Success", "Simple alignment transformation applied successfully!")
+                ttk.Label(row_frame, text=f"Point {i+1}:", width=8).pack(side=tk.LEFT)
 
-            else:
-                messagebox.showerror("Transformation Failed", "Failed to apply simple alignment transformation")
+                x_var = tk.StringVar(value="0.0")
+                y_var = tk.StringVar(value="0.0")
+
+                ttk.Label(row_frame, text="X:").pack(side=tk.LEFT, padx=(5, 2))
+                ttk.Entry(row_frame, textvariable=x_var, width=8).pack(side=tk.LEFT, padx=2)
+
+                ttk.Label(row_frame, text="Y:").pack(side=tk.LEFT, padx=(5, 2))
+                ttk.Entry(row_frame, textvariable=y_var, width=8).pack(side=tk.LEFT, padx=2)
+
+                point_vars.append((x_var, y_var))
+
+            # Buttons
+            btn_frame = ttk.Frame(dialog)
+            btn_frame.pack(pady=20)
+
+            def apply_manual_transform():
+                try:
+                    # Parse destination points
+                    destination_points = []
+                    for i, (x_var, y_var) in enumerate(point_vars):
+                        try:
+                            x = float(x_var.get())
+                            y = float(y_var.get())
+                            destination_points.append((x, y))
+                        except ValueError:
+                            messagebox.showerror("Invalid Input", f"Invalid coordinates for point {i+1}")
+                            return
+
+                    # Store original routes
+                    self.original_routes = self.route_manager.get_routes()
+
+                    # Apply transformation
+                    transformed_routes = self.transformation_service.apply_manual_transformation(
+                        self.original_routes, destination_points)
+
+                    if transformed_routes:
+                        # Update route manager
+                        self.route_manager.routes = transformed_routes
+                        self.transformed_routes = transformed_routes
+
+                        # Emit event
+                        self.route_manager.emit(RouteEvents.ROUTES_TRANSFORMED, {
+                            'source': 'manual_transformation',
+                            'route_count': len(transformed_routes)
+                        })
+
+                        dialog.destroy()
+                        messagebox.showinfo("Success", "Manual transformation applied successfully!")
+                    else:
+                        messagebox.showerror("Transformation Failed", "Could not apply manual transformation")
+
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to apply transformation: {e}")
+
+            ttk.Button(btn_frame, text="Apply", command=apply_manual_transform).pack(side=tk.LEFT, padx=5)
+            ttk.Button(btn_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
 
         except Exception as e:
-            error_msg = f"Failed to apply simple alignment transformation: {e}"
+            error_msg = f"Failed to show manual transform dialog: {e}"
             self.log(error_msg, "error")
             messagebox.showerror("Error", error_msg)
 
-    def debug_transformation(self):
-        """Show debug information about transformation data"""
-        try:
-            if not self.registration_available:
-                messagebox.showwarning("No Registration", "No registration data to debug")
-                return
-
-            # Get debug information
-            debug_info = self.route_transformer.debug_transformation_data(self.registration_manager)
-
-            # Create debug window
-            debug_window = tk.Toplevel(self.frame)
-            debug_window.title("Transformation Debug Info")
-            debug_window.geometry("600x400")
-
-            # Add scrollable text widget
-            text_frame = ttk.Frame(debug_window)
-            text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-            text_widget = tk.Text(text_frame, wrap=tk.WORD)
-            scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=text_widget.yview)
-            text_widget.configure(yscrollcommand=scrollbar.set)
-
-            text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-            # Format debug information
-            debug_text = "TRANSFORMATION DEBUG INFORMATION\n"
-            debug_text += "=" * 50 + "\n\n"
-
-            debug_text += f"Registration Status: {'REGISTERED' if debug_info['is_registered'] else 'NOT REGISTERED'}\n"
-            debug_text += f"Calibration Points: {debug_info['point_count']}\n\n"
-
-            if debug_info['is_registered']:
-                debug_text += f"Registration Error: {debug_info['registration_error']:.4f} mm\n\n"
-
-                debug_text += "TRANSFORMATION MATRIX:\n"
-                if debug_info['transformation_matrix']:
-                    matrix = debug_info['transformation_matrix']
-                    for row in matrix:
-                        debug_text += f"  [{', '.join(f'{val:8.4f}' for val in row)}]\n"
-                debug_text += "\n"
-
-                debug_text += "TRANSLATION VECTOR:\n"
-                if debug_info['translation_vector']:
-                    vector = debug_info['translation_vector']
-                    debug_text += f"  [{', '.join(f'{val:8.4f}' for val in vector)}]\n\n"
-
-                debug_text += "MACHINE POSITIONS (Registration Points):\n"
-                for i, pos in enumerate(debug_info['machine_positions'], 1):
-                    debug_text += f"  Point {i}: ({pos[0]:8.3f}, {pos[1]:8.3f}, {pos[2]:8.3f})\n"
-                debug_text += "\n"
-
-                debug_text += "CAMERA POSITIONS:\n"
-                for i, pos in enumerate(debug_info['camera_positions'], 1):
-                    debug_text += f"  Point {i}: ({pos[0]:8.3f}, {pos[1]:8.3f}, {pos[2]:8.3f})\n"
-                debug_text += "\n"
-
-                if 'machine_bounds' in debug_info:
-                    mb = debug_info['machine_bounds']
-                    debug_text += "MACHINE COORDINATE BOUNDS:\n"
-                    debug_text += f"  X: {mb['x_min']:8.3f} to {mb['x_max']:8.3f} (center: {mb['center_x']:8.3f})\n"
-                    debug_text += f"  Y: {mb['y_min']:8.3f} to {mb['y_max']:8.3f} (center: {mb['center_y']:8.3f})\n\n"
-
-                if 'camera_bounds' in debug_info:
-                    cb = debug_info['camera_bounds']
-                    debug_text += "CAMERA COORDINATE BOUNDS:\n"
-                    debug_text += f"  X: {cb['x_min']:8.3f} to {cb['x_max']:8.3f} (center: {cb['center_x']:8.3f})\n"
-                    debug_text += f"  Y: {cb['y_min']:8.3f} to {cb['y_max']:8.3f} (center: {cb['center_y']:8.3f})\n\n"
-
-                # Add simple alignment transformation analysis
-                if 'alignment_analysis' in debug_info:
-                    aa = debug_info['alignment_analysis']
-                    debug_text += "SIMPLE ALIGNMENT ANALYSIS:\n"
-                    debug_text += f"  Registration Center: ({aa['registration_center'][0]:8.3f}, {aa['registration_center'][1]:8.3f})\n"
-                    rab = aa['registration_area_bounds']
-                    debug_text += f"  Registration Area: {rab['width']:8.1f}×{rab['height']:8.1f}mm\n"
-                    debug_text += f"  Registration Bounds: ({rab['x_min']:8.1f}, {rab['y_min']:8.1f}) to ({rab['x_max']:8.1f}, {rab['y_max']:8.1f})\n\n"
-
-            # Add route information if available
-            if hasattr(self, 'current_bounds') and self.current_bounds:
-                debug_text += "CURRENT ROUTE BOUNDS:\n"
-                rb = self.current_bounds
-                debug_text += f"  X: {rb['x_min']:8.3f} to {rb['x_max']:8.3f} (center: {rb['center_x']:8.3f})\n"
-                debug_text += f"  Y: {rb['y_min']:8.3f} to {rb['y_max']:8.3f} (center: {rb['center_y']:8.3f})\n"
-                debug_text += f"  Size: {rb['width']:8.3f} × {rb['height']:8.3f} mm\n"
-
-            text_widget.insert(tk.END, debug_text)
-            text_widget.config(state=tk.DISABLED)
-
-            self.log("Debug information displayed")
-
-        except Exception as e:
-            error_msg = f"Failed to show debug information: {e}"
-            self.log(error_msg, "error")
-            messagebox.showerror("Error", error_msg)
-
-    def revert_to_original(self):
-        """Revert routes to their original state"""
+    def revert_transformation(self):
+        """Revert to original routes before transformation"""
         try:
             if not self.transformation_applied:
-                messagebox.showinfo("No Changes", "No transformation to revert")
+                messagebox.showinfo("No Transformation", "No transformation has been applied")
                 return
 
-            # Confirm action
+            if not self.original_routes:
+                messagebox.showerror("Cannot Revert", "Original routes not available")
+                return
+
+            # Confirm revert
             if not messagebox.askyesno("Revert Transformation",
-                                     "Revert routes to original coordinates?\n"
-                                     "This will undo the transformation."):
+                                     "Revert to original routes before transformation?"):
                 return
 
-            # Reload routes from original file
-            if hasattr(self.route_manager, 'current_file') and self.route_manager.current_file:
-                success = self.route_manager.load_routes_from_svg(self.route_manager.current_file)
-                if success:
-                    self.transformation_applied = False
-                    self.transformation_status_var.set("Reverted to original routes")
-                    self.transform_status_label.config(foreground="blue")
-                    self.log("Routes reverted to original state")
-                    self._update_ui_state()
-                    messagebox.showinfo("Success", "Routes reverted to original state")
-                else:
-                    messagebox.showerror("Error", "Failed to reload original routes")
-            else:
-                messagebox.showerror("Error", "No original route file available to revert to")
+            # Restore original routes
+            self.route_manager.routes = self.original_routes
+            self.transformation_applied = False
+            self.transformed_routes = None
+
+            # Update UI
+            self.transform_status_var.set("Transformation reverted")
+            self.transform_status_label.config(foreground="blue")
+
+            # Emit event
+            self.route_manager.emit(RouteEvents.ROUTES_TRANSFORMED, {
+                'source': 'revert_transformation',
+                'route_count': len(self.original_routes)
+            })
+
+            self.log("Transformation reverted to original routes")
+            self._update_ui_state()
+            messagebox.showinfo("Success", "Routes reverted to original state")
 
         except Exception as e:
-            error_msg = f"Failed to revert routes: {e}"
+            error_msg = f"Failed to revert transformation: {e}"
+            self.log(error_msg, "error")
+            messagebox.showerror("Error", error_msg)
+
+    def clear_all(self):
+        """Clear all transformation data"""
+        try:
+            if not messagebox.askyesno("Clear All",
+                                     "Clear all transformation data?\n"
+                                     "This will reset the transformation state but keep loaded routes."):
+                return
+
+            # Reset transformation state
+            self.transformation_applied = False
+            self.bounds_calculated = False
+            self.current_bounds = None
+            self.original_routes = None
+            self.transformed_routes = None
+
+            # Update UI
+            self.bounds_status_var.set("Bounds not calculated")
+            self.bounds_status_label.config(foreground="gray")
+
+            self.transform_status_var.set("Ready for transformation")
+            self.transform_status_label.config(foreground="blue")
+
+            self.log("Transformation state cleared")
+            self._update_ui_state()
+            messagebox.showinfo("Success", "Transformation state cleared")
+
+        except Exception as e:
+            error_msg = f"Failed to clear transformation state: {e}"
             self.log(error_msg, "error")
             messagebox.showerror("Error", error_msg)
