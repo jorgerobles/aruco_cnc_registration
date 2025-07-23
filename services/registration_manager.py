@@ -39,6 +39,9 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
 
         # self._event_broker is automatically available from decorator
 
+    def log(self,msg):
+        pass
+
     def add_calibration_point(self, machine_pos: np.ndarray, camera_tvec: np.ndarray, norm_pos: np.ndarray):
         """Add a calibration point to the registration dataset"""
         try:
@@ -357,11 +360,17 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             self.emit(RegistrationEvents.ERROR, error_msg)
             return False
 
+    """
+    Fix for load_registration method in registration_manager.py
+    The bug was that it recomputed the loaded transformation instead of using it
+    """
+
     def load_registration(self, filename: str) -> bool:
         """Load registration data from file"""
         try:
             data = np.load(filename, allow_pickle=True)
 
+            # Load transformation data
             self.transformation_matrix = data["rotation_matrix"]
             self.translation_vector = data["translation_vector"]
 
@@ -378,9 +387,9 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
                 # Reconstruct calibration points
                 self.calibration_points = []
                 for i in range(len(machine_positions)):
-                    machine_pos = machine_positions[i]
-                    camera_pos = camera_positions[i]
-                    norm_pos = norm_positions[i]
+                    machine_pos = self._ensure_3d(machine_positions[i])
+                    camera_pos = self._ensure_3d(camera_positions[i])
+                    norm_pos = tuple(norm_positions[i]) if len(norm_positions) > i else (0.0, 0.0)
                     self.calibration_points.append((machine_pos, camera_pos, norm_pos))
 
             # Load error if available (backwards compatibility)
@@ -388,16 +397,34 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             if self._registration_error is None:
                 self._registration_error = self._calculate_registration_error()
 
-            # Emit load success event (no longer using ERROR for success messages)
+            # Emit load success event
             self.emit(RegistrationEvents.LOADED, {
                 'filename': filename,
                 'point_count': len(self.calibration_points),
                 'error': self._registration_error
             })
 
-            if len(self.calibration_points) >= 3:
-                self.log(f"Auto-computing registration with {len(self.calibration_points)} loaded points")
+            # FIX: Check if registration is complete after loading
+            if self.is_registered():
+                # Registration is complete - emit COMPUTED event directly
+                # Do NOT call compute_registration() as it would overwrite loaded data
+                self.emit(RegistrationEvents.COMPUTED, {
+                    'point_count': len(self.calibration_points),
+                    'error': self._registration_error,
+                    'transformation_matrix': self.transformation_matrix.copy(),
+                    'translation_vector': self.translation_vector.copy(),
+                    'source': 'loaded_from_file'  # Indicate this came from file
+                })
+                self.log(
+                    f"Registration loaded from file with {len(self.calibration_points)} points, error: {self._registration_error:.4f}")
+            elif len(self.calibration_points) >= 3:
+                # Registration incomplete but we have enough points - compute it
+                self.log(f"Incomplete registration loaded, recomputing with {len(self.calibration_points)} points")
                 self.compute_registration()
+            else:
+                # Not enough points for registration
+                self.log(
+                    f"Registration loaded but insufficient points ({len(self.calibration_points)}) for computation")
 
             return True
 

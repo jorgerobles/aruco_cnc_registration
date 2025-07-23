@@ -1,3 +1,11 @@
+"""
+Complete Registration Panel with Fixed Connection Dependencies
+FIXED: Correct button enable/disable logic based on actual requirements
+- Capture: Requires camera connection (needs live marker detection)
+- Test Position: Requires registration only (works with loaded data)
+- Set Work Offset: Requires registration + machine connection (not camera)
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from typing import Callable, Optional
@@ -5,14 +13,16 @@ from typing import Callable, Optional
 from services.camera_manager import CameraEvents
 from services.event_broker import (event_aware, event_handler, EventPriority)
 from services.registration_manager import RegistrationEvents
+from services.grbl_controller import GRBLEvents
 
 
 @event_aware()
 class RegistrationPanel:
-    """Compact registration control panel with clean event awareness"""
+    """Compact registration control panel with clean event awareness and correct connection dependencies"""
 
-    def __init__(self, parent, registration_manager, logger: Optional[Callable] = None):
+    def __init__(self, parent, registration_manager, grbl_controller=None, logger: Optional[Callable] = None):
         self.registration_manager = registration_manager
+        self.grbl_controller = grbl_controller  # Track GRBL controller for offset operations
         self.logger = logger
 
         # Create main frame
@@ -27,10 +37,13 @@ class RegistrationPanel:
         self.test_callback = None
         self.set_offset_callback = None
 
-        # Camera connection state
+        # Connection state tracking
         self.camera_connected = False
 
         self._setup_widgets()
+
+        # Initialize button states with correct logic
+        self._update_button_states()
 
     def log(self, message: str, level: str = "info"):
         """Log message if logger is available"""
@@ -51,6 +64,16 @@ class RegistrationPanel:
         """Handle camera disconnection events"""
         self.on_camera_disconnected()
 
+    @event_handler(GRBLEvents.CONNECTED, EventPriority.NORMAL)
+    def _on_machine_connected(self, success: bool):
+        """Handle machine connection events"""
+        self._update_button_states()
+
+    @event_handler(GRBLEvents.DISCONNECTED, EventPriority.NORMAL)
+    def _on_machine_disconnected(self):
+        """Handle machine disconnection events"""
+        self._update_button_states()
+
     @event_handler(RegistrationEvents.POINT_ADDED, EventPriority.HIGH)
     def _on_point_added(self, point_data: dict):
         """Handle registration point added events"""
@@ -65,6 +88,7 @@ class RegistrationPanel:
     def _on_point_removed(self, point_data: dict):
         """Handle registration point removed events"""
         self.update_point_list()
+        self._update_button_states()
         self.log(f"Registration point removed")
 
     @event_handler(RegistrationEvents.COMPUTED, EventPriority.HIGH)
@@ -73,6 +97,7 @@ class RegistrationPanel:
         point_count = computation_data['point_count']
         error = computation_data['error']
         self.on_registration_computed(error)
+        self._update_button_states()  # Update button states when registration is computed
         self.log(f"Registration computed with {point_count} points, RMS error: {error:.4f}")
         messagebox.showinfo("Success", f"Registration computed!\nRMS Error: {error:.4f}mm")
 
@@ -86,6 +111,7 @@ class RegistrationPanel:
     def _on_registration_cleared(self, cleared_data: dict):
         """Handle registration data cleared events"""
         self.update_point_list()
+        self._update_button_states()  # Update button states when registration is cleared
         cleared_count = cleared_data.get('cleared_count', 0)
         self.log(f"Registration data cleared ({cleared_count} points)")
 
@@ -101,6 +127,7 @@ class RegistrationPanel:
     def _on_registration_loaded(self, load_data: dict):
         """Handle registration loaded events"""
         self.update_point_list()
+        self._update_button_states()  # Update button states when registration is loaded
         file_path = load_data.get('filename', 'unknown')
         point_count = load_data.get('point_count', 0)
         error = load_data.get('error', 0.0)
@@ -175,25 +202,37 @@ class RegistrationPanel:
     def on_camera_connected(self):
         """Enable camera-dependent controls when camera connects"""
         self.camera_connected = True
-        self.capture_btn.config(state='normal')
-        self.test_btn.config(state='normal')
-        self.offset_btn.config(state='normal')
-        self.log("Camera connected - registration controls enabled")
+        self._update_button_states()
+        self.log("Camera connected - capture enabled")
 
     def on_camera_disconnected(self):
         """Disable camera-dependent controls when camera disconnects"""
         self.camera_connected = False
-        self.capture_btn.config(state='disabled')
-        self.test_btn.config(state='disabled')
-        self.offset_btn.config(state='disabled')
-        self.log("Camera disconnected - registration controls disabled")
+        self._update_button_states()
+        self.log("Camera disconnected - capture disabled")
 
     def on_registration_computed(self, error: float):
         """Called when registration is computed successfully"""
         self.status_label.config(text=f"RMS: {error:.3f}mm")
-        if self.camera_connected:
-            self.test_btn.config(state='normal')
-            self.offset_btn.config(state='normal')
+        # Button states will be updated by _update_button_states()
+
+    def _update_button_states(self):
+        """Update button states based on current system state - FIXED LOGIC"""
+        # Capture button: Requires camera connection for live marker detection
+        capture_enabled = self.camera_connected
+        self.capture_btn.config(state='normal' if capture_enabled else 'disabled')
+
+        # Test Position button: Only requires registration (works with loaded data)
+        registration_available = self.registration_manager.is_registered()
+        test_enabled = registration_available
+        self.test_btn.config(state='normal' if test_enabled else 'disabled')
+
+        # Set Work Offset button: Requires registration + machine connection
+        machine_connected = (self.grbl_controller and
+                             hasattr(self.grbl_controller, 'is_connected') and
+                             self.grbl_controller.is_connected)
+        offset_enabled = registration_available and machine_connected
+        self.offset_btn.config(state='normal' if offset_enabled else 'disabled')
 
     def _capture_point(self):
         """Capture calibration point"""
@@ -212,15 +251,12 @@ class RegistrationPanel:
             self.log("No capture callback set", "error")
 
     def _test_position(self):
-        """Test current position"""
-        if not self.camera_connected:
-            messagebox.showerror("Error", "Camera not connected")
-            return
-
+        """Test current position with loaded registration data"""
         if not self.registration_manager.is_registered():
-            messagebox.showerror("Error", "No registration computed")
+            messagebox.showerror("Error", "No registration data available")
             return
 
+        # This can work without camera if we have registration data
         if self.test_callback:
             try:
                 self.log("Testing current position...")
@@ -232,13 +268,15 @@ class RegistrationPanel:
             self.log("No test callback set", "error")
 
     def _set_work_offset(self):
-        """Set work offset"""
-        if not self.camera_connected:
-            messagebox.showerror("Error", "Camera not connected")
+        """Set work offset using registration data"""
+        if not self.registration_manager.is_registered():
+            messagebox.showerror("Error", "No registration data available")
             return
 
-        if not self.registration_manager.is_registered():
-            messagebox.showerror("Error", "No registration computed")
+        if not (self.grbl_controller and
+                hasattr(self.grbl_controller, 'is_connected') and
+                self.grbl_controller.is_connected):
+            messagebox.showerror("Error", "Machine not connected")
             return
 
         if self.set_offset_callback:

@@ -343,7 +343,12 @@ class RegistrationGUI:
 
         self.machine_panel = JogPanel(scrollable_frame, self.grbl_controller)
 
-        self.registration_panel = RegistrationPanel(scrollable_frame, self.registration_manager)
+        self.registration_panel = RegistrationPanel(
+            scrollable_frame,
+            self.registration_manager,
+            self.grbl_controller,  # Add this parameter
+            self.log  # Add logger parameter
+        )
 
         # Set up registration panel callbacks
         self.registration_panel.set_callbacks(
