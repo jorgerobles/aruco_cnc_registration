@@ -550,77 +550,57 @@ class RegistrationGUI:
     # UPDATED capture_point method using enhanced CameraManager
 
     def capture_point(self):
-        """Capture calibration point using integrated camera manager FOV calculation"""
+        """Capture calibration point (callback for registration panel) - FIXED for camera offset"""
         try:
-            # 1. Get current machine position
-            machine_pos = self.grbl_controller.get_position()
-            self.log(f"Machine position: X{machine_pos[0]:.3f} Y{machine_pos[1]:.3f} Z{machine_pos[2]:.3f}")
-
-            # 2. Get marker position from marker overlay
-            rvec, tvec, norm_pos = self.marker_overlay.get_current_pose()
-            if tvec is None:
-                self.log("No marker detected in current frame", "error")
+            if not self.registration_manager or not self.camera_manager:
+                self.log("Managers not initialized", "error")
                 return
 
-            self.log(f"Marker at normalized position: ({norm_pos[0]:.3f}, {norm_pos[1]:.3f})")
+            if not self.camera_manager.is_connected:
+                self.log("Camera not connected", "error")
+                return
 
-            # 3. Get camera offset from hardware service
+            if not self.grbl_controller.is_connected:
+                self.log("GRBL not connected", "error")
+                return
+
+            # Get current marker pose from marker overlay
+            rvec, tvec, norm_pos = self.marker_overlay.get_current_pose()
+
+            if tvec is None:
+                self.log("No marker detected", "error")
+                return
+
+            # Get current machine position (this is SPINDLE position)
+            machine_spindle_position = self.grbl_controller.get_position()
+
+            # CRITICAL FIX: Get camera offset and apply it
+            # Camera offset (-45, 0, 0) means camera is 45mm to the LEFT of spindle
             camera_offset = self.hardware_service.get_camera_offset()
-            self.log(f"Camera offset: X{camera_offset['x']:.3f} Y{camera_offset['y']:.3f} Z{camera_offset['z']:.3f}")
 
-            # 4. Calculate camera position in machine coordinates
-            camera_machine_pos = [
-                machine_pos[0] + camera_offset['x'],
-                machine_pos[1] + camera_offset['y'],
-                machine_pos[2] + camera_offset['z']
+            # Calculate where the CAMERA is in machine coordinates
+            # Camera position = Spindle position + camera offset
+            marker_machine_pos = [
+                machine_spindle_position[0] + camera_offset['x'],  # X_camera = X_spindle - 45
+                machine_spindle_position[1] + camera_offset['y'],  # Y_camera = Y_spindle + 0
+                machine_spindle_position[2] + camera_offset['z']  # Z_camera = Z_spindle + 0
             ]
 
-            # 5. NEW: Use camera manager's integrated FOV calculation
-            # Option A: Use normalized coordinates with camera manager
-            marker_offset_mm = self.camera_manager.normalized_to_real_world(norm_pos[0], norm_pos[1])
-
-            if marker_offset_mm is None:
-                # Fallback: Calculate FOV from current frame
-                marker_size_mm = self.marker_overlay.marker_length
-                fov_data = self.camera_manager.calculate_fov_from_current_frame(marker_size_mm)
-
-                if fov_data is None:
-                    self.log("Could not calculate FOV - using direct OpenCV pose", "warning")
-                    # Option B: Use direct OpenCV pose (most accurate)
-                    marker_machine_pos = [
-                        camera_machine_pos[0] + tvec[0],  # Camera X → Machine X
-                        camera_machine_pos[1] - tvec[1],  # Camera Y → Machine Y (flip)
-                        camera_machine_pos[2] - tvec[2]  # Camera Z → Machine Z (flip)
-                    ]
-                else:
-                    self.log(f"FOV calculated: {fov_data['width_mm']:.1f}x{fov_data['height_mm']:.1f}mm")
-                    marker_offset_mm = self.camera_manager.normalized_to_real_world(norm_pos[0], norm_pos[1])
-
-            if marker_offset_mm is not None:
-                # Use FOV-based calculation
-                offset_x_mm, offset_y_mm = marker_offset_mm
-                marker_machine_pos = [
-                    camera_machine_pos[0] + offset_x_mm,
-                    camera_machine_pos[1] + offset_y_mm,
-                    machine_pos[2]  # Use machine Z position
-                ]
-                self.log(f"Marker offset from camera center: X{offset_x_mm:.3f} Y{offset_y_mm:.3f}")
-
             self.log(
-                f"Camera at machine coords: X{camera_machine_pos[0]:.3f} Y{camera_machine_pos[1]:.3f} Z{camera_machine_pos[2]:.3f}")
+                f"Spindle at: X{machine_spindle_position[0]:.3f} Y{machine_spindle_position[1]:.3f} Z{machine_spindle_position[2]:.3f}")
             self.log(
-                f"Marker at machine coords: X{marker_machine_pos[0]:.3f} Y{marker_machine_pos[1]:.3f} Z{marker_machine_pos[2]:.3f}")
+                f"Camera at:  X{marker_machine_pos[0]:.3f} Y{marker_machine_pos[1]:.3f} Z{marker_machine_pos[2]:.3f}")
 
-            # 6. Add to registration manager
+            # Add to registration manager - now mapping camera position to camera tvec
             self.registration_manager.add_calibration_point(
-                np.array(marker_machine_pos),  # Actual marker position in machine coordinates
+                np.array(marker_machine_pos),  # Camera position in machine coordinates
                 tvec,  # Marker position in camera coordinates (from OpenCV)
                 norm_pos  # Normalized position in camera frame
             )
 
             point_count = self.registration_manager.get_calibration_points_count()
             self.status_var.set(f"Captured point {point_count}")
-            self.log(f"✅ Captured calibration point {point_count} using camera manager FOV")
+            self.log(f"✅ Captured calibration point {point_count} with camera offset applied")
 
             # Update machine area window
             if hasattr(self,
