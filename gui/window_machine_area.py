@@ -567,7 +567,7 @@ class MachineAreaWindow:
                 frame_height_mm = fov_data['height_mm']
                 pixels_per_mm = fov_data['pixels_per_mm']
 
-                self.log(f"Using camera manager FOV data: {frame_width_mm:.1f}×{frame_height_mm:.1f}mm @ {pixels_per_mm:.2f}px/mm", "debug")
+
 
                 self.camera_frame_bounds = {
                     'x_min': cam_x - frame_width_mm / 2,
@@ -581,10 +581,10 @@ class MachineAreaWindow:
             else:
                 # No FOV data available - don't show camera frame
                 self.camera_frame_bounds = None
-                self.log("No FOV data from camera manager - camera frame hidden", "debug")
+
 
         except Exception as e:
-            self.log(f"Error updating camera frame bounds: {e}", "error")
+
             self.camera_frame_bounds = None
 
     def _update_camera_status_in_controls(self):
