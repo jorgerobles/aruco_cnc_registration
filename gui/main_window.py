@@ -550,7 +550,7 @@ class RegistrationGUI:
     # UPDATED capture_point method using enhanced CameraManager
 
     def capture_point(self):
-        """Capture calibration point (callback for registration panel) - FIXED for camera offset"""
+        """Capture calibration point using ArUco distance for Z coordinate - FIXED"""
         try:
             if not self.registration_manager or not self.camera_manager:
                 self.log("Managers not initialized", "error")
@@ -571,36 +571,39 @@ class RegistrationGUI:
                 self.log("No marker detected", "error")
                 return
 
-            # Get current machine position (this is SPINDLE position)
+            # Get current machine position (spindle position)
             machine_spindle_position = self.grbl_controller.get_position()
 
-            # CRITICAL FIX: Get camera offset and apply it
-            # Camera offset (-45, 0, 0) means camera is 45mm to the LEFT of spindle
+            # Apply camera offset for X and Y
             camera_offset = self.hardware_service.get_camera_offset()
 
-            # Calculate where the CAMERA is in machine coordinates
-            # Camera position = Spindle position + camera offset
+            # CRITICAL FIX: Use ArUco distance for Z instead of machine Z
+            aruco_distance_meters = np.linalg.norm(tvec.flatten())
+            aruco_distance_mm = aruco_distance_meters * 1000  # Convert to mm
+
+            # Camera position in machine coordinates
             marker_machine_pos = [
-                machine_spindle_position[0] + camera_offset['x'],  # X_camera = X_spindle - 45
-                machine_spindle_position[1] + camera_offset['y'],  # Y_camera = Y_spindle + 0
-                machine_spindle_position[2] + camera_offset['z']  # Z_camera = Z_spindle + 0
+                machine_spindle_position[0] + camera_offset['x'],  # X with camera offset
+                machine_spindle_position[1] + camera_offset['y'],  # Y with camera offset
+                aruco_distance_mm  # Z from ArUco measurement!
             ]
 
             self.log(
                 f"Spindle at: X{machine_spindle_position[0]:.3f} Y{machine_spindle_position[1]:.3f} Z{machine_spindle_position[2]:.3f}")
+            self.log(f"Camera at:  X{marker_machine_pos[0]:.3f} Y{marker_machine_pos[1]:.3f}")
             self.log(
-                f"Camera at:  X{marker_machine_pos[0]:.3f} Y{marker_machine_pos[1]:.3f} Z{marker_machine_pos[2]:.3f}")
+                f"CORRECTED Z: Using ArUco distance {aruco_distance_mm:.1f}mm instead of machine Z {machine_spindle_position[2]:.1f}mm")
 
-            # Add to registration manager - now mapping camera position to camera tvec
+            # Add to registration manager
             self.registration_manager.add_calibration_point(
-                np.array(marker_machine_pos),  # Camera position in machine coordinates
-                tvec,  # Marker position in camera coordinates (from OpenCV)
-                norm_pos  # Normalized position in camera frame
+                np.array(marker_machine_pos),  # Camera position with correct Z
+                tvec,  # ArUco tvec
+                norm_pos  # Normalized position
             )
 
             point_count = self.registration_manager.get_calibration_points_count()
             self.status_var.set(f"Captured point {point_count}")
-            self.log(f"✅ Captured calibration point {point_count} with camera offset applied")
+            self.log(f"✅ Captured calibration point {point_count} with CORRECT Z coordinate")
 
             # Update machine area window
             if hasattr(self,
