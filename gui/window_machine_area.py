@@ -603,13 +603,13 @@ class MachineAreaWindow:
                 camera_info = self.camera_manager.get_camera_info()
                 connected = camera_info.get('connected', False)
                 calibrated = camera_info.get('calibrated', False)
-                
+
                 if connected:
                     resolution = (
                         camera_info.get('width', 640),
                         camera_info.get('height', 480)
                     )
-                
+
                 fov_data = self.camera_manager.get_current_fov()
 
             # Update controls
@@ -707,60 +707,6 @@ class MachineAreaWindow:
 
         except Exception as e:
             self.log(f"Error updating display: {e}", "error")
-
-    def update_status_display(self):
-        """Update status text display with FOV information"""
-        if not self.status_text:
-            return
-
-        try:
-            status_lines = []
-
-            # Machine status
-            pos = self.current_machine_position
-            status_lines.append(f"Machine: ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})")
-
-            # Machine bounds info
-            bounds = self.machine_bounds
-            status_lines.append(f"Bounds: X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
-
-            # Camera status with FOV info from camera manager
-            if self.current_camera_position:
-                cam_x, cam_y = self.current_camera_position
-                camera_line = f"Camera: ({cam_x:.1f}, {cam_y:.1f})"
-
-                # Add FOV status from camera manager
-                if self.camera_manager:
-                    fov_data = self.camera_manager.get_current_fov()
-                    if fov_data:
-                        source = fov_data.get('calculated_from', 'unknown')
-                        camera_line += f" | FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm [{source}]"
-                    else:
-                        camera_line += " | FOV: No data"
-
-                status_lines.append(camera_line)
-            else:
-                status_lines.append("Camera: No position")
-
-            # Routes status
-            if self.actual_routes:
-                total_points = sum(len(route) for route in self.actual_routes)
-                status_lines.append(f"Routes: {len(self.actual_routes)} paths, {total_points} points")
-            else:
-                status_lines.append("Routes: None loaded")
-
-            # View status with origin info
-            if self.canvas_component:
-                view_info = self.canvas_component.get_view_info()
-                origin_name = self.hardware_service.get_machine_origin_name() if self.hardware_service else "unknown"
-                status_lines.append(f"View: Zoom {view_info['zoom_factor']:.1f}x | Origin: {origin_name}")
-
-            # Update text widget
-            self.status_text.delete(1.0, tk.END)
-            self.status_text.insert(1.0, "\n".join(status_lines))
-
-        except Exception as e:
-            self.log(f"Error updating status display: {e}", "error")
 
     # Public interface methods
     def set_machine_bounds(self, x_max: float, y_max: float, x_min: float = None, y_min: float = None):
@@ -896,3 +842,70 @@ class MachineAreaWindow:
         if self.window:
             self.window.destroy()
         self.log("Machine area visualization with camera manager FOV integration cleaned up")
+
+    def update_status_display(self):
+        """Update status text display - MODIFIED for 2D registration status"""
+        if not self.status_text:
+            return
+
+        try:
+            status_lines = []
+
+            # Machine status (still 3D for machine itself)
+            pos = self.current_machine_position
+            status_lines.append(f"Machine: ({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f})")
+
+            # Machine bounds info
+            bounds = self.machine_bounds
+            status_lines.append(
+                f"Bounds: X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
+
+            # MODIFIED: Camera status - Updated for 2D
+            if self.current_camera_position:
+                cam_x, cam_y = self.current_camera_position
+                # Updated camera display for 2D
+                camera_line = f"Camera: ({cam_x:.1f}, {cam_y:.1f}) [2D]"  # CHANGED: added [2D] label
+
+                # Add FOV status from camera manager
+                if self.camera_manager:
+                    fov_data = self.camera_manager.get_current_fov()
+                    if fov_data:
+                        source = fov_data.get('calculated_from', 'unknown')
+                        camera_line += f" | FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm [{source}]"
+                    else:
+                        camera_line += " | FOV: No data"
+
+                status_lines.append(camera_line)
+            else:
+                status_lines.append("Camera: No position [2D mode]")  # CHANGED: added [2D mode]
+
+            # Routes status
+            if self.actual_routes:
+                total_points = sum(len(route) for route in self.actual_routes)
+                status_lines.append(f"Routes: {len(self.actual_routes)} paths, {total_points} points")
+            else:
+                status_lines.append("Routes: None loaded")
+
+            # ADDED: Registration status - New section for 2D registration info
+            if hasattr(self, 'registration_manager') and self.registration_manager:
+                if self.registration_manager.is_registered():
+                    error = self.registration_manager.get_registration_error() or 0.0
+                    point_count = self.registration_manager.get_calibration_points_count()
+                    status_lines.append(f"Registration: 2D mode, {point_count} points, RMS: {error:.3f}mm")
+                else:
+                    point_count = self.registration_manager.get_calibration_points_count()
+                    needed = max(0, 3 - point_count)
+                    status_lines.append(f"Registration: 2D mode, need {needed} more points")
+
+            # View status with origin info
+            if self.canvas_component:
+                view_info = self.canvas_component.get_view_info()
+                origin_name = self.hardware_service.get_machine_origin_name() if self.hardware_service else "unknown"
+                status_lines.append(f"View: Zoom {view_info['zoom_factor']:.1f}x | Origin: {origin_name}")
+
+            # Update text widget
+            self.status_text.delete(1.0, tk.END)
+            self.status_text.insert(1.0, "\n".join(status_lines))
+
+        except Exception as e:
+            self.log(f"Error updating status display: {e}", "error")

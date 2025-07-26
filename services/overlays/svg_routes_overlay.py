@@ -471,52 +471,6 @@ class SVGRoutesOverlay(FrameOverlay):
 
         self.log("=" * 60, "info")
 
-    def _transform_svg_routes_to_machine(self, svg_routes: List[List[Tuple[float, float]]]) -> List[
-        List[Tuple[float, float]]]:
-        """
-        Transform SVG routes to machine coordinates using the registration manager
-
-        Args:
-            svg_routes: List of routes in SVG coordinates
-
-        Returns:
-            List of routes in machine coordinates
-        """
-        machine_routes = []
-        transform_errors = []
-
-        for route_idx, route in enumerate(svg_routes):
-            machine_route = []
-            route_errors = 0
-
-            for point_idx, (x, y) in enumerate(route):
-                # Convert SVG point to machine coordinates
-                svg_point_3d = np.array([x, y, 0.0])
-
-                try:
-                    # Transform using registration manager
-                    machine_point_3d = self.registration_manager.transform_point(svg_point_3d)
-                    # Extract x, y for 2D route
-                    machine_route.append((machine_point_3d[0], machine_point_3d[1]))
-                except Exception as e:
-                    self.log(f"Error transforming route {route_idx} point {point_idx} ({x}, {y}): {e}", "error")
-                    # Fallback to original coordinates
-                    machine_route.append((x, y))
-                    route_errors += 1
-
-            if machine_route:
-                machine_routes.append(machine_route)
-                transform_errors.append(route_errors)
-
-        # Log transformation summary
-        total_errors = sum(transform_errors)
-        if total_errors > 0:
-            self.log(f"Transform completed with {total_errors} errors across {len(transform_errors)} routes", "warning")
-        else:
-            self.log(f"Transform completed successfully for {len(machine_routes)} routes", "info")
-
-        return machine_routes
-
     def update_camera_view(self, camera_position_3d: np.ndarray, scale_factor: Optional[float] = None):
         """
         Update the AR overlay based on current camera position in machine coordinates
@@ -1206,3 +1160,42 @@ class SVGRoutesOverlay(FrameOverlay):
             base_info['debug_info'] = self.route_debug_info.copy()
 
         return base_info
+
+    def _transform_svg_routes_to_machine(self, svg_routes: List[List[Tuple[float, float]]]) -> List[List[Tuple[float, float]]]:
+        """
+        Transform SVG routes to machine coordinates using 2D registration - MODIFIED for 2D only
+        """
+        machine_routes = []
+        transform_errors = []
+
+        for route_idx, route in enumerate(svg_routes):
+            machine_route = []
+            route_errors = 0
+
+            for point_idx, (x, y) in enumerate(route):
+                # MODIFIED: Convert SVG point to 2D array for transformation
+                svg_point_2d = np.array([x, y])  # CHANGED: from 3D to 2D
+
+                try:
+                    # MODIFIED: Transform using 2D registration manager
+                    machine_point_2d = self.registration_manager.transform_point(svg_point_2d)
+                    # Result is already 2D, no need to extract coordinates
+                    machine_route.append((machine_point_2d[0], machine_point_2d[1]))
+                except Exception as e:
+                    self.log(f"Error transforming route {route_idx} point {point_idx} ({x}, {y}): {e}", "error")
+                    # Fallback to original coordinates
+                    machine_route.append((x, y))
+                    route_errors += 1
+
+            if machine_route:
+                machine_routes.append(machine_route)
+                transform_errors.append(route_errors)
+
+        # MODIFIED: Log transformation summary with 2D indicator
+        total_errors = sum(transform_errors)
+        if total_errors > 0:
+            self.log(f"2D Transform completed with {total_errors} errors across {len(transform_errors)} routes", "warning")
+        else:
+            self.log(f"2D Transform completed successfully for {len(machine_routes)} routes", "info")
+
+        return machine_routes

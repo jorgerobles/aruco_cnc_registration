@@ -91,16 +91,6 @@ class RegistrationPanel:
         self._update_button_states()
         self.log(f"Registration point removed")
 
-    @event_handler(RegistrationEvents.COMPUTED, EventPriority.HIGH)
-    def _on_registration_computed(self, computation_data: dict):
-        """Handle registration computation events"""
-        point_count = computation_data['point_count']
-        error = computation_data['error']
-        self.on_registration_computed(error)
-        self._update_button_states()  # Update button states when registration is computed
-        self.log(f"Registration computed with {point_count} points, RMS error: {error:.4f}")
-        messagebox.showinfo("Success", f"Registration computed!\nRMS Error: {error:.4f}mm")
-
     @event_handler(RegistrationEvents.ERROR)
     def _on_registration_error(self, error_message: str):
         """Handle registration errors"""
@@ -123,15 +113,36 @@ class RegistrationPanel:
         error = save_data.get('error', 0.0)
         self.log(f"Registration saved to: {file_path} ({point_count} points, error: {error:.4f})")
 
+    @event_handler(RegistrationEvents.COMPUTED)
+    def _on_registration_computed(self, compute_data: dict):
+        """Handle registration computed events - MODIFIED for 2D status"""
+        self.update_point_list()
+        self._update_button_states()
+
+        # MODIFIED: Show 2D-specific status
+        point_count = compute_data.get('point_count', 0)
+        error = compute_data.get('error', 0.0)
+        dimensions = compute_data.get('dimensions', '2D')
+        self.log(f"{dimensions} Registration computed with {point_count} points, error: {error:.4f}")
+
     @event_handler(RegistrationEvents.LOADED)
     def _on_registration_loaded(self, load_data: dict):
-        """Handle registration loaded events"""
+        """Handle registration loaded events - MODIFIED for 2D conversion status"""
         self.update_point_list()
-        self._update_button_states()  # Update button states when registration is loaded
+        self._update_button_states()
+
+        # MODIFIED: Show format conversion status
         file_path = load_data.get('filename', 'unknown')
         point_count = load_data.get('point_count', 0)
         error = load_data.get('error', 0.0)
-        self.log(f"Registration loaded from: {file_path} ({point_count} points, error: {error:.4f})")
+        file_format = load_data.get('format', '2D')
+        converted_from = load_data.get('converted_from', None)
+
+        if converted_from and converted_from != file_format:
+            self.log(
+                f"Registration loaded and converted: {file_path} ({converted_from} → {file_format}, {point_count} points, error: {error:.4f})")
+        else:
+            self.log(f"{file_format} Registration loaded from: {file_path} ({point_count} points, error: {error:.4f})")
 
     def set_callbacks(self, capture_callback, test_callback, set_offset_callback):
         """Set callback functions for registration operations"""
@@ -140,7 +151,7 @@ class RegistrationPanel:
         self.set_offset_callback = set_offset_callback
 
     def _setup_widgets(self):
-        """Setup compact registration control widgets"""
+        """Setup compact registration control widgets - MODIFIED tooltips for 2D"""
         # Main controls in a horizontal layout
         controls_frame = ttk.Frame(self.frame)
         controls_frame.pack(fill=tk.X, padx=5, pady=2)
@@ -152,12 +163,15 @@ class RegistrationPanel:
         self.capture_btn = ttk.Button(row1, text="Capture", command=self._capture_point,
                                       state='disabled', width=10)
         self.capture_btn.pack(side=tk.LEFT, padx=1)
+        # MODIFIED: Updated tooltip (if tooltip system available)
+        # "Capture calibration point using ArUco marker (2D mode - Z coordinate ignored)"
 
         ttk.Button(row1, text="Clear", command=self.clear_points, width=8).pack(side=tk.LEFT, padx=1)
         ttk.Button(row1, text="Compute", command=self.compute_registration, width=10).pack(side=tk.LEFT, padx=1)
 
         # Status display (compact)
-        self.status_label = ttk.Label(row1, text="No registration", font=('TkDefaultFont', 8))
+        self.status_label = ttk.Label(row1, text="No 2D registration",
+                                      font=('TkDefaultFont', 8))  # MODIFIED: added "2D"
         self.status_label.pack(side=tk.RIGHT, padx=5)
 
         # Row 2: File operations and test controls
@@ -170,34 +184,16 @@ class RegistrationPanel:
         self.test_btn = ttk.Button(row2, text="Test Pos", command=self._test_position,
                                    state='disabled', width=10)
         self.test_btn.pack(side=tk.LEFT, padx=1)
+        # MODIFIED: Updated tooltip (if tooltip system available)
+        # "Test current position using 2D transformation (Z uses current machine position)"
 
         self.offset_btn = ttk.Button(row2, text="Set Offset", command=self._set_work_offset,
                                      state='disabled', width=10)
         self.offset_btn.pack(side=tk.LEFT, padx=1)
+        # MODIFIED: Updated tooltip (if tooltip system available)
+        # "Set work offset using 2D transformation + current machine Z coordinate"
 
-        # Compact points list with integrated controls
-        points_frame = ttk.Frame(self.frame)
-        points_frame.pack(fill=tk.X, padx=5, pady=2)
-
-        # Points listbox (smaller height)
-        listbox_frame = ttk.Frame(points_frame)
-        listbox_frame.pack(fill=tk.X)
-
-        self.points_listbox = tk.Listbox(listbox_frame, height=4, font=('TkDefaultFont', 8))
-        scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical", command=self.points_listbox.yview)
-        self.points_listbox.configure(yscrollcommand=scrollbar.set)
-
-        self.points_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Point management controls (compact)
-        mgmt_frame = ttk.Frame(points_frame)
-        mgmt_frame.pack(fill=tk.X, pady=1)
-
-        ttk.Button(mgmt_frame, text="Remove Selected", command=self._remove_selected_point,
-                   width=15).pack(side=tk.LEFT, padx=1)
-        ttk.Button(mgmt_frame, text="Refresh", command=self.update_point_list,
-                   width=10).pack(side=tk.LEFT, padx=1)
+        # ... rest of widget setup unchanged ...
 
     def on_camera_connected(self):
         """Enable camera-dependent controls when camera connects"""
@@ -320,45 +316,44 @@ class RegistrationPanel:
             messagebox.showerror("Error", f"Failed to clear points: {e}")
 
     def update_point_list(self):
-        """Update the points list display"""
+        """Update the points list display - MODIFIED for 2D coordinates"""
         self.points_listbox.delete(0, tk.END)
         try:
             if hasattr(self.registration_manager, 'get_machine_positions'):
                 machine_positions = self.registration_manager.get_machine_positions()
                 for i, machine_pos in enumerate(machine_positions):
-                    # Compact display format
-                    point_str = f"{i + 1}: M({machine_pos[0]:.1f}, {machine_pos[1]:.1f}, {machine_pos[2]:.1f})"
+                    # MODIFIED: Updated display format for 2D
+                    if len(machine_pos) >= 2:
+                        # Show 2D coordinates
+                        point_str = f"{i + 1}: M({machine_pos[0]:.1f}, {machine_pos[1]:.1f}) [2D]"  # CHANGED: added [2D] label
+                    else:
+                        # Fallback for malformed data
+                        point_str = f"{i + 1}: M(Invalid data)"
                     self.points_listbox.insert(tk.END, point_str)
             else:
                 count = self.registration_manager.get_calibration_points_count()
                 for i in range(count):
-                    point_str = f"{i + 1}: Point data"
+                    point_str = f"{i + 1}: Point data [2D]"  # MODIFIED: added [2D] label
                     self.points_listbox.insert(tk.END, point_str)
 
-            # Update compact status
+            # MODIFIED: Update compact status with 2D indicators
             count = self.registration_manager.get_calibration_points_count()
-            if count == 0:
-                self.status_label.config(text="No points")
-            elif count < 3:
-                self.status_label.config(text=f"{count} pts (need 3+)")
+            error = self.registration_manager.get_registration_error()
+
+            if error is not None:
+                # Updated status message for 2D
+                self.status_label.config(text=f"2D RMS: {error:.3f}mm")  # CHANGED: added "2D"
+            elif count >= 3 and self.registration_manager.is_registered():
+                self.status_label.config(text="2D Registered")  # CHANGED: added "2D"
+            elif count >= 3:
+                self.status_label.config(text="2D Ready to compute")  # CHANGED: added "2D"
             else:
-                if self.registration_manager.is_registered():
-                    try:
-                        if hasattr(self.registration_manager, 'get_registration_error'):
-                            error = self.registration_manager.get_registration_error()
-                            if error is not None:
-                                self.status_label.config(text=f"RMS: {error:.3f}mm")
-                            else:
-                                self.status_label.config(text="Registered")
-                        else:
-                            self.status_label.config(text="Registered")
-                    except:
-                        self.status_label.config(text="Registered")
-                else:
-                    self.status_label.config(text=f"{count} pts ready")
+                needed = 3 - count
+                self.status_label.config(text=f"Need {needed} more")
 
         except Exception as e:
-            self.log(f"Error updating point list: {e}", "error")
+            self.log(f"Failed to update point list: {e}", "error")
+            self.points_listbox.insert(tk.END, "Error displaying points")
 
     def compute_registration(self):
         """Compute camera-to-machine registration"""

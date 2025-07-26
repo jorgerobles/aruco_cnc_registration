@@ -233,19 +233,31 @@ class RegistrationGUI:
             self.machine_area_window.update_calibration_points()
             self.machine_area_window.schedule_update()
 
-    @event_handler(RegistrationEvents.COMPUTED, EventPriority.HIGH)
-    def _on_registration_computed(self, computation_data: dict):
-        """Handle successful registration computation"""
-        point_count = computation_data['point_count']
-        error = computation_data['error']
+    @event_handler(RegistrationEvents.COMPUTED)
+    def _on_registration_computed(self, data: dict):
+        """Handle registration computed event - ADDED for 2D status"""
+        point_count = data.get('point_count', 0)
+        error = data.get('error', 0.0)
+        dimensions = data.get('dimensions', '2D')  # New field from 2D registration
 
-        self.log(f"Registration computed successfully with {point_count} points. RMS error: {error:.4f}")
-        self.status_var.set(f"Registration complete - Error: {error:.4f}")
+        self.log(f"✅ {dimensions} Registration computed: {point_count} points, RMS error: {error:.3f}mm")
 
-        # Update machine area window
-        if hasattr(self, 'machine_area_window') and self.machine_area_window and self.machine_area_window.is_visible:
-            self.machine_area_window.update_calibration_points()
-            self.machine_area_window.schedule_update()
+        # Update status bar
+        self.status_var.set(f"{dimensions} Registration: {error:.3f}mm RMS")
+
+    @event_handler(RegistrationEvents.LOADED)
+    def _on_registration_loaded(self, data: dict):
+        """Handle registration loaded event - ADDED for 2D conversion status"""
+        point_count = data.get('point_count', 0)
+        error = data.get('error', 0.0)
+        file_format = data.get('format', '2D')
+        converted_from = data.get('converted_from', None)
+
+        if converted_from and converted_from != file_format:
+            self.log(
+                f"✅ Registration loaded and converted: {converted_from} → {file_format}, {point_count} points, RMS: {error:.3f}mm")
+        else:
+            self.log(f"✅ {file_format} Registration loaded: {point_count} points, RMS: {error:.3f}mm")
 
     @event_handler(RegistrationEvents.ERROR, EventPriority.HIGH)
     def _on_registration_error(self, error_message: str):
@@ -521,36 +533,14 @@ class RegistrationGUI:
 
         self.root.bind('<KeyPress>', on_key_press)
 
-    def toggle_machine_area_window(self):
-        """Toggle machine area window"""
-        if hasattr(self, 'machine_area_window') and self.machine_area_window:
-            if self.machine_area_window.is_visible:
-                self.machine_area_window.hide_window()
-                if self.machine_area_toggle_button:
-                    self.machine_area_toggle_button.config(
-                        text="Show Machine Area",
-                        bg='#4a90e2'
-                    )
-                self.log("Machine area window hidden")
-            else:
-                self.machine_area_window.show_window()
-                if self.machine_area_toggle_button:
-                    self.machine_area_toggle_button.config(
-                        text="Hide Machine Area",
-                        bg='#d0021b'
-                    )
-                self.log("Machine area window shown")
-
     def set_machine_bounds_quick(self, x_max: float, y_max: float):
         """Quick set machine bounds"""
         if hasattr(self, 'machine_area_window') and self.machine_area_window:
             self.machine_area_window.set_machine_bounds(x_max, y_max)
             self.log(f"Machine bounds set to {x_max}x{y_max}mm")
 
-    # UPDATED capture_point method using enhanced CameraManager
-
     def capture_point(self):
-        """Capture calibration point using ArUco distance for Z coordinate - FIXED"""
+        """Capture calibration point using 2D coordinates only - Z IGNORED"""
         try:
             if not self.registration_manager or not self.camera_manager:
                 self.log("Managers not initialized", "error")
@@ -574,36 +564,30 @@ class RegistrationGUI:
             # Get current machine position (spindle position)
             machine_spindle_position = self.grbl_controller.get_position()
 
-            # Apply camera offset for X and Y
+            # Apply camera offset for X and Y only - IGNORE Z
             camera_offset = self.hardware_service.get_camera_offset()
 
-            # CRITICAL FIX: Use ArUco distance for Z instead of machine Z
-            aruco_distance_meters = np.linalg.norm(tvec.flatten())
-            aruco_distance_mm = aruco_distance_meters * 1000  # Convert to mm
-
-            # Camera position in machine coordinates
+            # Camera position in machine coordinates - 2D ONLY
             marker_machine_pos = [
                 machine_spindle_position[0] + camera_offset['x'],  # X with camera offset
                 machine_spindle_position[1] + camera_offset['y'],  # Y with camera offset
-                aruco_distance_mm  # Z from ArUco measurement!
+                # Z COORDINATE REMOVED - working in 2D only
             ]
 
-            self.log(
-                f"Spindle at: X{machine_spindle_position[0]:.3f} Y{machine_spindle_position[1]:.3f} Z{machine_spindle_position[2]:.3f}")
+            self.log(f"Spindle at: X{machine_spindle_position[0]:.3f} Y{machine_spindle_position[1]:.3f}")
             self.log(f"Camera at:  X{marker_machine_pos[0]:.3f} Y{marker_machine_pos[1]:.3f}")
-            self.log(
-                f"CORRECTED Z: Using ArUco distance {aruco_distance_mm:.1f}mm instead of machine Z {machine_spindle_position[2]:.1f}mm")
+            self.log("Using 2D registration - Z coordinate ignored")  # MODIFIED: new message
 
-            # Add to registration manager
+            # Add to registration manager - pass 2D coordinates
             self.registration_manager.add_calibration_point(
-                np.array(marker_machine_pos),  # Camera position with correct Z
-                tvec,  # ArUco tvec
+                np.array(marker_machine_pos),  # 2D camera position [x, y]
+                tvec[:2],  # Use only X, Y from tvec - IGNORE Z
                 norm_pos  # Normalized position
             )
 
             point_count = self.registration_manager.get_calibration_points_count()
             self.status_var.set(f"Captured point {point_count}")
-            self.log(f"✅ Captured calibration point {point_count} with CORRECT Z coordinate")
+            self.log(f"✅ Captured 2D calibration point {point_count}")  # MODIFIED: added "2D"
 
             # Update machine area window
             if hasattr(self,
@@ -612,12 +596,12 @@ class RegistrationGUI:
                 self.machine_area_window.schedule_update()
 
         except Exception as e:
-            self.log(f"❌ Failed to capture point: {e}", "error")
+            self.log(f"❌ Failed to capture 2D point: {e}", "error")  # MODIFIED: added "2D"
             import traceback
             self.log(f"Traceback: {traceback.format_exc()}", "error")
 
     def test_position(self):
-        """Test current position (callback for registration panel)"""
+        """Test current position using 2D transformation"""
         try:
             if not self.registration_manager.is_registered():
                 self.log("Registration not computed", "error")
@@ -630,24 +614,26 @@ class RegistrationGUI:
                 self.log("No marker detected", "error")
                 return
 
-            # Transform to machine coordinates
-            machine_point = self.registration_manager.transform_point(tvec.flatten())
+            # Transform to machine coordinates using 2D only
+            machine_point = self.registration_manager.transform_point(tvec[:2])  # MODIFIED: Use only X, Y
 
+            # MODIFIED: Updated log message for 2D
             self.log(
-                f"Position test - Camera: {tvec.flatten()}, Predicted machine: X{machine_point[0]:.3f} Y{machine_point[1]:.3f} Z{machine_point[2]:.3f}")
+                f"Position test - Camera: {tvec[:2]}, Predicted machine: X{machine_point[0]:.3f} Y{machine_point[1]:.3f}")
 
             # Update machine area window with camera position
             if hasattr(self,
                        'machine_area_window') and self.machine_area_window and self.machine_area_window.is_visible:
+                # Use 2D coordinates only
                 self.machine_area_window.current_camera_position = (machine_point[0], machine_point[1])
                 self.machine_area_window.update_camera_bounds()
                 self.machine_area_window.schedule_update()
 
         except Exception as e:
-            self.log(f"Position test failed: {e}", "error")
+            self.log(f"2D Position test failed: {e}", "error")  # MODIFIED: added "2D"
 
     def set_work_offset(self):
-        """Set work offset (callback for registration panel)"""
+        """Set work offset using 2D transformation + current Z"""
         try:
             if not self.registration_manager.is_registered():
                 self.log("Registration not computed", "error")
@@ -660,16 +646,23 @@ class RegistrationGUI:
                 self.log("No marker detected", "error")
                 return
 
-            # Transform to machine coordinates
-            machine_point = self.registration_manager.transform_point(tvec.flatten())
+            # Transform to machine coordinates using 2D
+            machine_point_2d = self.registration_manager.transform_point(tvec[:2])  # MODIFIED: 2D only
 
-            # Set work offset
-            response = self.grbl_controller.set_work_offset(machine_point, coordinate_system=1)
+            # For work offset, use current machine Z coordinate
+            current_machine_pos = self.grbl_controller.get_position()
+            machine_point_3d = [machine_point_2d[0], machine_point_2d[1],
+                                current_machine_pos[2]]  # MODIFIED: combine 2D + current Z
+
+            # Set work offset with 3D coordinates
+            response = self.grbl_controller.set_work_offset(machine_point_3d, coordinate_system=1)
             for line in response:
                 self.log(f"OFFSET: {line}", "received")
 
             self.status_var.set("Work offset set")
-            self.log(f"Work offset set to: X{machine_point[0]:.3f} Y{machine_point[1]:.3f} Z{machine_point[2]:.3f}")
+            # MODIFIED: Updated log message to show Z source
+            self.log(
+                f"Work offset set to: X{machine_point_3d[0]:.3f} Y{machine_point_3d[1]:.3f} Z{machine_point_3d[2]:.3f} (Z from current machine pos)")
 
         except Exception as e:
             self.log(f"Failed to set work offset: {e}", "error")
