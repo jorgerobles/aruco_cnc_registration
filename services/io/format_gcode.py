@@ -6,11 +6,12 @@ SVG and G-code importer/exporter implementations
 import os
 from typing import List, Tuple, Optional, Dict, Any
 
+from services.io.form_interface import IFormSchemaProvider
 from services.io.io_interfaces import IRouteExporter
 from svg.tangential import routes_to_gcode
 
 
-class GCodeExporter(IRouteExporter):
+class GCodeExporter(IRouteExporter, IFormSchemaProvider):
     """G-code file exporter using tangential.py module"""
 
     @property
@@ -91,4 +92,61 @@ class GCodeExporter(IRouteExporter):
             'initial_rotation': 0,
             'offset': 2.75,
             'angle_threshold': 30
+        }
+
+    def get_form_schema(self) -> Optional[Dict[str, Any]]:
+        """Get G-Code export form schema"""
+        return {
+            "title": "G-Code Export Options",
+            "width": 350,
+            "height": 350,
+            "sections": [
+                {
+                    "title": "Motion Parameters",
+                    "fields": [
+                        {
+                            "name": "speed",
+                            "type": "number",
+                            "label": "Speed (mm/min):",
+                            "default": 1500,
+                            "width": 10
+                        },
+                        {
+                            "name": "cut_depth",
+                            "type": "float",
+                            "label": "Cut depth (mm):",
+                            "default": -1.0,
+                            "width": 10
+                        },
+                        {
+                            "name": "safety_height",
+                            "type": "float",
+                            "label": "Safety height (mm):",
+                            "default": 5.0,
+                            "width": 10
+                        },
+                        {
+                            "name": "offset",
+                            "type": "float",
+                            "label": "Offset (mm):",
+                            "default": 2.75,
+                            "width": 10
+                        },
+                        {
+                            "name": "angle_threshold",
+                            "type": "number",
+                            "label": "Angle threshold (°):",
+                            "default": 30,
+                            "width": 10
+                        },
+                        {
+                            "name": "initial_rotation",
+                            "type": "number",
+                            "label": "Initial rotation (°):",
+                            "default": 0,
+                            "width": 10
+                        }
+                    ]
+                }
+            ]
         }

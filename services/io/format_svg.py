@@ -6,6 +6,7 @@ SVG importer/exporter implementations using existing svg modules
 import os
 from typing import List, Tuple, Optional, Dict, Any
 
+from services.io.form_interface import IFormSchemaProvider
 from services.io.io_interfaces import IRouteImporter, IRouteExporter
 from svg.svg_loader import svg_to_routes
 from svg.svg_exporter import routes_to_svg
@@ -47,7 +48,7 @@ class SVGImporter(IRouteImporter):
             return None
 
 
-class SVGExporter(IRouteExporter):
+class SVGExporter(IRouteExporter, IFormSchemaProvider):
     """SVG file exporter using svg_exporter module"""
 
     @property
@@ -85,4 +86,58 @@ class SVGExporter(IRouteExporter):
             'stroke_width': 0.1,
             'stroke_color': 'black',
             'metadata': None
+        }
+
+    def get_form_schema(self) -> Optional[Dict[str, Any]]:
+        """Get SVG export form schema"""
+        return {
+            "title": "SVG Export Options",
+            "width": 350,
+            "height": 280,
+            "sections": [
+                {
+                    "title": "Dimensions (auto if empty)",
+                    "fields": [
+                        {
+                            "name": "width_mm",
+                            "type": "optional_number",
+                            "label": "Width (mm):",
+                            "width": 10
+                        },
+                        {
+                            "name": "height_mm",
+                            "type": "optional_number",
+                            "label": "Height (mm):",
+                            "width": 10
+                        }
+                    ]
+                },
+                {
+                    "title": "Style",
+                    "fields": [
+                        {
+                            "name": "margin_mm",
+                            "type": "float",
+                            "label": "Margin (mm):",
+                            "default": 5.0,
+                            "width": 10
+                        },
+                        {
+                            "name": "stroke_width",
+                            "type": "float",
+                            "label": "Stroke width:",
+                            "default": 0.1,
+                            "width": 10
+                        },
+                        {
+                            "name": "stroke_color",
+                            "type": "choice",
+                            "label": "Color:",
+                            "default": "black",
+                            "options": ["black", "red", "blue", "green"],
+                            "width": 8
+                        }
+                    ]
+                }
+            ]
         }
