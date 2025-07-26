@@ -1,14 +1,14 @@
 """
-Routes Service Manager
-Centralized management of route data for the application
+Enhanced RouteManager with SVG Export
+Uses svg_exporter module following existing architecture pattern
 """
 
 from typing import List, Tuple, Optional, Dict, Any
-
 import numpy as np
 
 from services.event_broker import event_aware
 from svg.svg_loader import svg_to_routes
+from svg.svg_exporter import routes_to_svg
 
 
 class RouteEvents:
@@ -17,11 +17,12 @@ class RouteEvents:
     ROUTES_CLEARED = "routes.cleared"
     ROUTES_TRANSFORMED = "routes.transformed"
     ROUTE_BOUNDS_CHANGED = "routes.bounds_changed"
+    ROUTES_EXPORTED = "routes.exported"  # New export event
 
 
 @event_aware()
 class RouteManager:
-    """Centralized routes management service"""
+    """Enhanced RouteManager with SVG export capabilities"""
 
     def __init__(self, logger=None, skip_display_none=True):
         self.skip_display_none = skip_display_none
@@ -53,8 +54,7 @@ class RouteManager:
         try:
             self.log(f"Loading routes from SVG: {svg_file}")
 
-            # Use your existing svg_loader
-            routes = svg_to_routes(svg_file, angle_threshold,self.skip_display_none)
+            routes = svg_to_routes(svg_file, angle_threshold, self.skip_display_none)
 
             if not routes:
                 self.log("No routes found in SVG file", "warning")
@@ -74,7 +74,6 @@ class RouteManager:
             self.transformed_routes = []
 
             self.log(f"Loaded {len(self.routes)} routes with {self.point_count} total points")
-            self.log(f"Route bounds: {self.route_bounds}")
 
             # Emit event
             self.emit(RouteEvents.ROUTES_LOADED, {
@@ -91,6 +90,76 @@ class RouteManager:
             self.log(f"Error loading SVG routes: {e}", "error")
             self.clear_routes()
             return False
+
+    def export_routes_to_svg(self,
+                           output_file: str,
+                           use_transformed: bool = False,
+                           **kwargs) -> bool:
+        """
+        Export routes to SVG file using svg_exporter module
+
+        Args:
+            output_file: Output SVG file path
+            use_transformed: Use transformed routes if available
+            **kwargs: Additional arguments passed to routes_to_svg
+
+        Returns:
+            True if export successful
+        """
+        try:
+            # Get routes to export
+            routes_to_export = self._get_export_routes(use_transformed)
+
+            if not routes_to_export:
+                self.log("No routes to export", "warning")
+                return False
+
+            self.log(f"Exporting {len(routes_to_export)} routes to: {output_file}")
+
+            # Add metadata
+            metadata = self._create_export_metadata()
+
+            # Use svg_exporter module (same pattern as svg_loader)
+            success = routes_to_svg(
+                routes=routes_to_export,
+                output_file=output_file,
+                metadata=metadata,
+                **kwargs
+            )
+
+            if success:
+                self.emit(RouteEvents.ROUTES_EXPORTED, {
+                    'output_file': output_file,
+                    'route_count': len(routes_to_export),
+                    'use_transformed': use_transformed
+                })
+                self.log(f"Successfully exported SVG: {output_file}")
+            else:
+                self.log("Export failed", "error")
+
+            return success
+
+        except Exception as e:
+            error_msg = f"Failed to export SVG: {e}"
+            self.log(error_msg, "error")
+            return False
+
+    def _get_export_routes(self, use_transformed: bool) -> List[List[Tuple[float, float]]]:
+        """Get routes for export (original or transformed)"""
+        if use_transformed and self.transformed_routes:
+            return self.transformed_routes
+        return self.routes
+
+    def _create_export_metadata(self) -> Dict[str, Any]:
+        """Create metadata for export"""
+        return {
+            'source_file': self.current_file or 'unknown',
+            'route_count': len(self.routes),
+            'point_count': self.point_count,
+            'total_length_mm': f"{self.total_length:.2f}",
+            'exported_by': 'RouteManager'
+        }
+
 
     def clear_routes(self):
         """Clear all route data"""
@@ -141,25 +210,6 @@ class RouteManager:
             'total_length': self.total_length,
             'has_transformation': self.transformation_matrix is not None,
         }
-
-    def set_transformation_matrix(self, matrix: np.ndarray):
-        """Set transformation matrix for camera registration"""
-        try:
-            self.transformation_matrix = matrix.copy()
-            self._apply_transformation()
-            self.log("Transformation matrix applied to routes")
-
-            self.emit(RouteEvents.ROUTES_TRANSFORMED, {
-                'route_count': len(self.transformed_routes),
-                'transformation_applied': True
-            })
-
-        except Exception as e:
-            self.log(f"Error applying transformation: {e}", "error")
-
-    def get_transformed_routes(self) -> List[List[Tuple[float, float]]]:
-        """Get transformed routes (if transformation is applied)"""
-        return self.transformed_routes.copy() if self.transformed_routes else self.get_routes()
 
     def _calculate_bounds(self):
         """Calculate bounding box of all routes"""
@@ -218,88 +268,3 @@ class RouteManager:
             self.log(f"Error calculating statistics: {e}", "error")
             self.total_length = 0.0
             self.point_count = 0
-
-    def _apply_transformation(self):
-        """Apply transformation matrix to routes"""
-        if not self.routes or self.transformation_matrix is None:
-            self.transformed_routes = []
-            return
-
-        try:
-            self.transformed_routes = []
-
-            for route in self.routes:
-                transformed_route = []
-
-                for x, y in route:
-                    # Apply transformation matrix
-                    point = np.array([x, y, 1])  # Homogeneous coordinates
-                    transformed_point = self.transformation_matrix @ point
-                    transformed_route.append((transformed_point[0], transformed_point[1]))
-
-                self.transformed_routes.append(transformed_route)
-
-        except Exception as e:
-            self.log(f"Error applying transformation: {e}", "error")
-            self.transformed_routes = []
-
-    def export_routes_to_gcode(self, output_file: str, feed_rate: float = 1000.0) -> bool:
-        """Export routes to G-code file"""
-        try:
-            routes_to_export = self.get_transformed_routes() if self.transformation_matrix else self.routes
-
-            if not routes_to_export:
-                self.log("No routes to export", "warning")
-                return False
-
-            with open(output_file, 'w') as f:
-                # G-code header
-                f.write("; Generated by GRBL Camera Registration\n")
-                f.write(f"; Routes from: {self.current_file}\n")
-                f.write(f"; {len(routes_to_export)} routes, {self.point_count} points\n")
-                f.write("\n")
-
-                # Initialize
-                f.write("G90 ; Absolute positioning\n")
-                f.write("G21 ; Units in mm\n")
-                f.write(f"F{feed_rate:.0f} ; Set feed rate\n")
-                f.write("\n")
-
-                # Process each route
-                for route_idx, route in enumerate(routes_to_export):
-                    f.write(f"; Route {route_idx + 1}\n")
-
-                    if route:
-                        # Move to start position (rapid)
-                        x, y = route[0]
-                        f.write(f"G0 X{x:.3f} Y{y:.3f} ; Move to start\n")
-
-                        # Draw route (linear moves)
-                        for x, y in route[1:]:
-                            f.write(f"G1 X{x:.3f} Y{y:.3f}\n")
-
-                        f.write("\n")
-
-                # Footer
-                f.write("; End of routes\n")
-                f.write("M30 ; Program end\n")
-
-            self.log(f"Routes exported to G-code: {output_file}")
-            return True
-
-        except Exception as e:
-            self.log(f"Error exporting G-code: {e}", "error")
-            return False
-
-    def get_service_status(self) -> Dict[str, Any]:
-        """Get service status for debugging"""
-        return {
-            'routes_loaded': self.routes_loaded,
-            'route_count': len(self.routes) if self.routes else 0,
-            'point_count': self.point_count,
-            'total_length': self.total_length,
-            'bounds': self.route_bounds,
-            'current_file': self.current_file,
-            'has_transformation': self.transformation_matrix is not None,
-            'transformed_routes_count': len(self.transformed_routes) if self.transformed_routes else 0,
-        }
