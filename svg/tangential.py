@@ -1,4 +1,4 @@
-from vector import shift, angle, angle_diff
+from .vector import shift, angle, angle_diff
 
 
 def routes_to_gcode(points, speed=1500, cut_depth=1.0, safety_height=5.0, initial_rotation=0, offset=5,

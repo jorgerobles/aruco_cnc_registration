@@ -11,7 +11,7 @@ from .panel_machine import MachinePanel
 from .panel_jogger import JogPanel
 from .panel_registration import RegistrationPanel
 
-from .panel_svg import SVGRoutesPanel
+from .panel_routes import RoutesPanel
 
 __all__ = [
     'RegistrationGUI',
@@ -20,5 +20,5 @@ __all__ = [
     'RegistrationPanel',
     'CameraPanel',
     'CameraDisplay',
-    'SVGRoutesPanel'
+    'RoutesPanel'
 ]

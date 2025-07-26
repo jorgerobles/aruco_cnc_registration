@@ -202,7 +202,7 @@ def demonstrate_ui_integration():
 
     try:
         import tkinter as tk
-        from panel_svg import SVGRoutesPanel
+        from panel_routes import RoutesPanel
 
         # Create a simple test window
         root = tk.Tk()
@@ -219,7 +219,7 @@ def demonstrate_ui_integration():
         overlay = SVGRoutesOverlay(registration_manager=reg_manager, logger=logger)
 
         # Create panel
-        panel = SVGRoutesPanel(root, overlay, logger=logger)
+        panel = RoutesPanel(root, overlay, logger=logger)
 
         # Add instruction label
         instruction_text = """

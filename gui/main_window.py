@@ -20,7 +20,7 @@ from gui.panel_jogger import JogPanel
 from gui.panel_machine import MachinePanel
 from gui.panel_machine_area import MachineAreaPanel
 from gui.panel_registration import RegistrationPanel
-from gui.panel_svg import SVGRoutesPanel
+from gui.panel_routes import RoutesPanel
 from gui.window_machine_area import MachineAreaWindow
 from services.camera_manager import CameraEvents
 from services.event_broker import (event_aware, event_handler, EventBroker, EventPriority)
@@ -46,7 +46,7 @@ class RegistrationGUI:
         self.camera_display = None
         self.marker_overlay = None
         self.routes_overlay = None
-        self.svg_panel = None
+        self.routes_panel = None
         self.connection_panel = None
         self.machine_panel = None
         self.registration_panel = None
@@ -409,7 +409,7 @@ class RegistrationGUI:
         # Create SVG routes panel now that overlays are ready
         # Get the parent frame from the control panel setup
         control_parent = self.connection_panel.frame.master
-        self.svg_panel = SVGRoutesPanel(
+        self.routes_panel = RoutesPanel(
             control_parent, self.route_manager, self.log
         )
 
@@ -857,9 +857,9 @@ class RegistrationGUI:
                     pass
 
             # Get SVG routes status
-            if self.svg_panel:
+            if self.routes_panel:
                 try:
-                    panel_status = self.svg_panel.get_panel_status()
+                    panel_status = self.routes_panel.get_panel_status()
                     status['svg_routes']['loaded'] = panel_status.get('routes_loaded', False)
                     status['svg_routes']['visible'] = panel_status.get('routes_visible', False)
                     status['svg_routes']['count'] = panel_status.get('routes_count', 0)
@@ -907,8 +907,8 @@ class RegistrationGUI:
                 self.registration_panel.update_point_list()
 
             # Refresh SVG panel
-            if self.svg_panel:
-                self.svg_panel.refresh_overlay()
+            if self.routes_panel:
+                self.routes_panel.refresh_overlay()
 
             # Update debug panel camera status
             if self.debug_panel:
