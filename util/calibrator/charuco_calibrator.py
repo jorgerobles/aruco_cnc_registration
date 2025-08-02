@@ -2,8 +2,8 @@
 
 import numpy as np
 from typing import List, Optional, Tuple
-from board_manager import CharucoBoardManager
-from calibration_strategy import CalibrationStrategy
+from .board_manager import CharucoBoardManager
+from .calibration_strategy import CalibrationStrategy
 
 
 class CharucoCalibrator:
