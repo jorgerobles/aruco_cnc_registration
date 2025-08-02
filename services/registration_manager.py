@@ -1,7 +1,7 @@
 """
-Fixed Registration Manager
+Fixed Registration Manager - 2D Consistent
 Handles camera-to-machine coordinate transformation logic with clean event handling
-Eliminates duplicate logging and improper use of ERROR events for success messages
+All operations now consistently use 2D coordinates (X, Y only)
 """
 
 import numpy as np
@@ -24,12 +24,12 @@ class RegistrationEvents:
     VALIDATION_PASSED = "registration.validation_passed"
     VALIDATION_FAILED = "registration.validation_failed"
     ERROR = "registration.error"
-    DEBUG_INFO = "registration.debug_info"  # New event for debug information
+    DEBUG_INFO = "registration.debug_info"
 
 
 @event_aware()
 class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IRegistrationPersistence):
-    """Manages camera-to-machine coordinate registration with clean event notifications"""
+    """Manages camera-to-machine coordinate registration with consistent 2D operations"""
 
     def __init__(self):
         self.calibration_points = []  # [(machine_pos, camera_tvec, norm_pos), ...]
@@ -37,17 +37,15 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
         self.translation_vector = None
         self._registration_error = None
 
-        # self._event_broker is automatically available from decorator
-
-    def log(self,msg):
+    def log(self, msg):
         pass
 
     def add_calibration_point(self, machine_pos: np.ndarray, camera_tvec: np.ndarray, norm_pos: np.ndarray):
         """Add a calibration point - store as 2D only"""
         try:
-            # Ensure consistent dimensions - use only X, Y coordinates - CHANGED FROM 3D
-            machine_pos_2d = self._ensure_2d(machine_pos)  # CHANGED FROM _ensure_3d
-            camera_tvec_2d = self._ensure_2d(camera_tvec.flatten())  # CHANGED FROM _ensure_3d
+            # Ensure consistent 2D dimensions
+            machine_pos_2d = self._ensure_2d(machine_pos)
+            camera_tvec_2d = self._ensure_2d(camera_tvec.flatten())
 
             point_data = (machine_pos_2d.copy(), camera_tvec_2d.copy(), norm_pos)
             self.calibration_points.append(point_data)
@@ -78,19 +76,6 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             error_msg = f"Failed to add 2D calibration point: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
             return False
-
-    def _ensure_3d(self, point: np.ndarray) -> np.ndarray:
-        """Ensure point is exactly 3D"""
-        point = np.asarray(point).flatten()
-
-        if len(point) >= 3:
-            # Take only first 3 dimensions if more are provided
-            return point[:3].copy()
-        else:
-            # Pad with zeros if less than 3 dimensions
-            padded = np.zeros(3)
-            padded[:len(point)] = point
-            return padded
 
     def _ensure_2d(self, point: np.ndarray) -> np.ndarray:
         """Ensure point is 2D format (x, y)"""
@@ -177,9 +162,7 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
         return None
 
     def compute_registration(self, force_recompute: bool = False) -> bool:
-        """
-        Compute 2D rigid transformation from camera to machine coordinates - Z IGNORED
-        """
+        """Compute 2D rigid transformation from camera to machine coordinates"""
         try:
             if len(self.calibration_points) < 3:
                 error_msg = "Need at least 3 calibration points for registration"
@@ -190,17 +173,17 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             if not force_recompute and self.is_registered():
                 return True
 
-            # Extract points and ensure consistent 2D format - CHANGED FROM 3D
+            # Extract points and ensure consistent 2D format
             machine_points = []
             camera_points = []
 
             for machine_pos, camera_tvec, _ in self.calibration_points:
-                machine_2d = self._ensure_2d(machine_pos)  # CHANGED FROM _ensure_3d
-                camera_2d = self._ensure_2d(camera_tvec)  # CHANGED FROM _ensure_3d
+                machine_2d = self._ensure_2d(machine_pos)
+                camera_2d = self._ensure_2d(camera_tvec)
                 machine_points.append(machine_2d)
                 camera_points.append(camera_2d)
 
-            # Compute 2D rigid transformation - CHANGED FROM 3D
+            # Compute 2D rigid transformation
             self.transformation_matrix, self.translation_vector = self._compute_rigid_transform(
                 camera_points, machine_points)
 
@@ -213,7 +196,7 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
                 'error': self._registration_error,
                 'transformation_matrix': self.transformation_matrix.copy(),
                 'translation_vector': self.translation_vector.copy(),
-                'dimensions': '2D'  # ADDED TO INDICATE 2D TRANSFORMATION
+                'dimensions': '2D'
             })
 
             return True
@@ -226,35 +209,35 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
     def _compute_rigid_transform(self, A: List[np.ndarray], B: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
         """
         Compute 2D rigid transformation (rotation + translation) from point set A to B
-        Using Kabsch algorithm with 2D points only - Z IGNORED
+        Using Kabsch algorithm with 2D points only
         """
         try:
-            # Convert to numpy arrays and ensure 2D - CHANGED FROM 3D
+            # Convert to numpy arrays and ensure 2D
             A_array = np.array([self._ensure_2d(point) for point in A])  # Shape: (N, 2)
             B_array = np.array([self._ensure_2d(point) for point in B])  # Shape: (N, 2)
 
             if A_array.shape[0] != B_array.shape[0]:
                 raise ValueError(f"Point count mismatch: A has {A_array.shape[0]}, B has {B_array.shape[0]}")
 
-            if A_array.shape[1] != 2 or B_array.shape[1] != 2:  # CHANGED FROM 3 TO 2
+            if A_array.shape[1] != 2 or B_array.shape[1] != 2:
                 raise ValueError(f"Points must be 2D: A shape {A_array.shape}, B shape {B_array.shape}")
 
             # Compute centroids
-            centroid_A = np.mean(A_array, axis=0)  # Shape: (2,) - CHANGED FROM (3,)
-            centroid_B = np.mean(B_array, axis=0)  # Shape: (2,) - CHANGED FROM (3,)
+            centroid_A = np.mean(A_array, axis=0)  # Shape: (2,)
+            centroid_B = np.mean(B_array, axis=0)  # Shape: (2,)
 
             # Center the points
-            AA = A_array - centroid_A  # Shape: (N, 2) - CHANGED FROM (N, 3)
-            BB = B_array - centroid_B  # Shape: (N, 2) - CHANGED FROM (N, 3)
+            AA = A_array - centroid_A  # Shape: (N, 2)
+            BB = B_array - centroid_B  # Shape: (N, 2)
 
             # Compute cross-covariance matrix H = AA.T @ BB
-            H = AA.T @ BB  # Shape: (2, 2) - CHANGED FROM (3, 3)
+            H = AA.T @ BB  # Shape: (2, 2)
 
             # SVD decomposition
             U, S, Vt = np.linalg.svd(H)
 
             # Compute rotation matrix
-            R = Vt.T @ U.T  # Shape: (2, 2) - CHANGED FROM (3, 3)
+            R = Vt.T @ U.T  # Shape: (2, 2)
 
             # Ensure proper rotation (det(R) = 1)
             if np.linalg.det(R) < 0:
@@ -262,7 +245,7 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
                 R = Vt.T @ U.T
 
             # Compute translation
-            t = centroid_B - R @ centroid_A  # Shape: (2,) - CHANGED FROM (3,)
+            t = centroid_B - R @ centroid_A  # Shape: (2,)
 
             return R, t
 
@@ -277,7 +260,7 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             raise ValueError(error_msg)
 
         try:
-            # Ensure 2D point - CHANGED FROM 3D
+            # Ensure 2D point
             camera_2d = self._ensure_2d(camera_point)
 
             # Apply transformation: R @ point + t
@@ -289,7 +272,7 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
                 'machine_point': transformed.copy()
             })
 
-            return transformed  # Returns 2D point - CHANGED FROM 3D
+            return transformed  # Returns 2D point
 
         except Exception as e:
             error_msg = f"Point transformation failed: {e}"
@@ -305,7 +288,7 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
 
             self.emit(RegistrationEvents.BATCH_TRANSFORMED, {
                 'point_count': len(camera_points),
-                'camera_points': [self._ensure_3d(p) for p in camera_points],
+                'camera_points': [self._ensure_2d(p) for p in camera_points],
                 'machine_points': [p.copy() for p in transformed_points]
             })
 
@@ -322,21 +305,21 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
                 self.translation_vector is not None)
 
     def save_registration(self, filename: str) -> bool:
-        """Save registration data to file"""
+        """Save registration data to file - 2D CONSISTENT"""
         try:
             if not self.is_registered():
                 error_msg = "No registration data to save"
                 self.emit(RegistrationEvents.ERROR, error_msg)
                 raise ValueError(error_msg)
 
-            # Convert calibration points to a format that can be saved
+            # Convert calibration points to a format that can be saved - KEEP 2D
             machine_positions = []
             camera_positions = []
             norm_positions = []
 
             for machine_pos, camera_tvec, norm_pos in self.calibration_points:
-                machine_positions.append(self._ensure_3d(machine_pos))
-                camera_positions.append(self._ensure_3d(camera_tvec))
+                machine_positions.append(self._ensure_2d(machine_pos))  # CHANGED: Keep 2D
+                camera_positions.append(self._ensure_2d(camera_tvec))   # CHANGED: Keep 2D
                 norm_positions.append(norm_pos)
 
             save_data = {
@@ -346,12 +329,12 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
                 'camera_positions': np.array(camera_positions),
                 'norm_positions': np.array(norm_positions),
                 'registration_error': self._registration_error,
-                'point_count': len(self.calibration_points)
+                'point_count': len(self.calibration_points),
+                'dimensions': '2D'  # ADDED: Mark as 2D data
             }
 
             np.savez(filename, **save_data)
 
-            # Emit save success event (no longer using ERROR for success messages)
             self.emit(RegistrationEvents.SAVED, {
                 'filename': filename,
                 'point_count': len(self.calibration_points),
@@ -365,71 +348,33 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             self.emit(RegistrationEvents.ERROR, error_msg)
             return False
 
-    """
-    Fix for load_registration method in registration_manager.py
-    The bug was that it recomputed the loaded transformation instead of using it
-    """
-
     def load_registration(self, filename: str) -> bool:
-        """Load registration data from file"""
+        """Load registration data from file - 2D CONSISTENT"""
         try:
-            data = np.load(filename, allow_pickle=True)
+            data = np.load(filename)
 
             # Load transformation data
             self.transformation_matrix = data["rotation_matrix"]
             self.translation_vector = data["translation_vector"]
+            self._registration_error = float(data["registration_error"]) if "registration_error" in data else None
 
-            # Handle both old and new save formats
-            if "calibration_points" in data:
-                # Old format - directly saved calibration_points
-                self.calibration_points = data["calibration_points"].tolist()
-            else:
-                # New format - separate arrays
-                machine_positions = data["machine_positions"]
-                camera_positions = data["camera_positions"]
-                norm_positions = data["norm_positions"]
+            # Load calibration points - ensure 2D consistency
+            self.calibration_points = []
+            machine_positions = data["machine_positions"]
+            camera_positions = data["camera_positions"]
+            norm_positions = data["norm_positions"]
 
-                # Reconstruct calibration points
-                self.calibration_points = []
-                for i in range(len(machine_positions)):
-                    machine_pos = self._ensure_3d(machine_positions[i])
-                    camera_pos = self._ensure_3d(camera_positions[i])
-                    norm_pos = tuple(norm_positions[i]) if len(norm_positions) > i else (0.0, 0.0)
-                    self.calibration_points.append((machine_pos, camera_pos, norm_pos))
+            for i in range(len(machine_positions)):
+                machine_pos = self._ensure_2d(machine_positions[i])  # CHANGED: Ensure 2D
+                camera_pos = self._ensure_2d(camera_positions[i])    # CHANGED: Ensure 2D
+                norm_pos = norm_positions[i]
+                self.calibration_points.append((machine_pos, camera_pos, norm_pos))
 
-            # Load error if available (backwards compatibility)
-            self._registration_error = data.get("registration_error", None)
-            if self._registration_error is None:
-                self._registration_error = self._calculate_registration_error()
-
-            # Emit load success event
             self.emit(RegistrationEvents.LOADED, {
                 'filename': filename,
                 'point_count': len(self.calibration_points),
                 'error': self._registration_error
             })
-
-            # FIX: Check if registration is complete after loading
-            if self.is_registered():
-                # Registration is complete - emit COMPUTED event directly
-                # Do NOT call compute_registration() as it would overwrite loaded data
-                self.emit(RegistrationEvents.COMPUTED, {
-                    'point_count': len(self.calibration_points),
-                    'error': self._registration_error,
-                    'transformation_matrix': self.transformation_matrix.copy(),
-                    'translation_vector': self.translation_vector.copy(),
-                    'source': 'loaded_from_file'  # Indicate this came from file
-                })
-                self.log(
-                    f"Registration loaded from file with {len(self.calibration_points)} points, error: {self._registration_error:.4f}")
-            elif len(self.calibration_points) >= 3:
-                # Registration incomplete but we have enough points - compute it
-                self.log(f"Incomplete registration loaded, recomputing with {len(self.calibration_points)} points")
-                self.compute_registration()
-            else:
-                # Not enough points for registration
-                self.log(
-                    f"Registration loaded but insufficient points ({len(self.calibration_points)}) for computation")
 
             return True
 
@@ -439,17 +384,11 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             return False
 
     def get_registration_error(self) -> Optional[float]:
-        """
-        Get the current registration error (RMS)
-        Returns None if registration not computed
-        """
+        """Get the current registration error (RMS)"""
         return self._registration_error
 
     def _calculate_registration_error(self) -> Optional[float]:
-        """
-        Calculate registration error (RMS) for current calibration points
-        Returns None if registration not computed
-        """
+        """Calculate registration error (RMS) for current calibration points - 2D CONSISTENT"""
         if not self.is_registered() or not self.calibration_points:
             return None
 
@@ -457,7 +396,8 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             errors = []
             for machine_pos, camera_tvec, _ in self.calibration_points:
                 predicted_machine = self.transform_point(camera_tvec)
-                error = np.linalg.norm(predicted_machine - self._ensure_3d(machine_pos))
+                # FIXED: Use 2D comparison instead of 3D
+                error = np.linalg.norm(predicted_machine - self._ensure_2d(machine_pos))
                 errors.append(error)
 
             rms_error = np.sqrt(np.mean(np.square(errors)))
@@ -473,16 +413,18 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             'point_count': len(self.calibration_points),
             'is_registered': self.is_registered(),
             'registration_error': self._registration_error,
-            'has_sufficient_points': len(self.calibration_points) >= 3
+            'has_sufficient_points': len(self.calibration_points) >= 3,
+            'dimensions': '2D'  # ADDED: Mark as 2D stats
         }
 
         if self.is_registered() and self.calibration_points:
-            # Calculate per-point errors
+            # Calculate per-point errors - 2D CONSISTENT
             point_errors = []
             for i, (machine_pos, camera_tvec, _) in enumerate(self.calibration_points):
                 try:
                     predicted_machine = self.transform_point(camera_tvec)
-                    error = np.linalg.norm(predicted_machine - self._ensure_3d(machine_pos))
+                    # FIXED: Use 2D comparison
+                    error = np.linalg.norm(predicted_machine - self._ensure_2d(machine_pos))
                     point_errors.append(error)
                 except:
                     point_errors.append(float('inf'))
@@ -497,15 +439,7 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
         return stats
 
     def validate_registration(self, tolerance: float = 1.0) -> bool:
-        """
-        Validate registration quality
-
-        Args:
-            tolerance: Maximum acceptable RMS error
-
-        Returns:
-            True if registration is valid, False otherwise
-        """
+        """Validate registration quality"""
         try:
             if not self.is_registered():
                 self.emit(RegistrationEvents.VALIDATION_FAILED, {
@@ -556,88 +490,11 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             error_msg = f"Failed to reset registration: {e}"
             self.emit(RegistrationEvents.ERROR, error_msg)
 
-    def save_registration_json(self, filename: str) -> bool:
-        """Save registration data to JSON file (human-readable backup)"""
-        try:
-            import json
-
-            if not self.is_registered():
-                error_msg = "No registration data to save"
-                self.emit(RegistrationEvents.ERROR, error_msg)
-                return False
-
-            # Convert numpy arrays to lists for JSON serialization
-            save_data = {
-                'rotation_matrix': self.transformation_matrix.tolist(),
-                'translation_vector': self.translation_vector.tolist(),
-                'registration_error': float(self._registration_error) if self._registration_error else None,
-                'point_count': len(self.calibration_points),
-                'calibration_points': []
-            }
-
-            # Convert calibration points to JSON-serializable format
-            for i, (machine_pos, camera_tvec, norm_pos) in enumerate(self.calibration_points):
-                point_data = {
-                    'index': i,
-                    'machine_position': self._ensure_3d(machine_pos).tolist(),
-                    'camera_position': self._ensure_3d(camera_tvec).tolist(),
-                    'normalized_position': norm_pos if isinstance(norm_pos, (list, tuple)) else float(norm_pos)
-                }
-                save_data['calibration_points'].append(point_data)
-
-            # Save to JSON file
-            with open(filename, 'w') as f:
-                json.dump(save_data, f, indent=2)
-
-            return True
-
-        except Exception as e:
-            error_msg = f"Failed to save registration to JSON: {e}"
-            self.emit(RegistrationEvents.ERROR, error_msg)
-            return False
-
-    def load_registration_json(self, filename: str) -> bool:
-        """Load registration data from JSON file"""
-        try:
-            import json
-
-            with open(filename, 'r') as f:
-                data = json.load(f)
-
-            self.transformation_matrix = np.array(data["rotation_matrix"])
-            self.translation_vector = np.array(data["translation_vector"])
-            self._registration_error = data.get("registration_error")
-
-            # Reconstruct calibration points
-            self.calibration_points = []
-            for point_data in data["calibration_points"]:
-                machine_pos = np.array(point_data["machine_position"])
-                camera_pos = np.array(point_data["camera_position"])
-                norm_pos = point_data["normalized_position"]
-                self.calibration_points.append((machine_pos, camera_pos, norm_pos))
-
-            self.emit(RegistrationEvents.LOADED, {
-                'filename': filename,
-                'point_count': len(self.calibration_points),
-                'error': self._registration_error
-            })
-
-            if len(self.calibration_points) >= 3:
-                self.log(f"Auto-computing registration with {len(self.calibration_points)} loaded points")
-                self.compute_registration()
-
-            return True
-
-        except Exception as e:
-            error_msg = f"Failed to load registration from JSON: {e}"
-            self.emit(RegistrationEvents.ERROR, error_msg)
-            return False
-
     def debug_calibration_points(self):
         """Debug method to print calibration point information"""
-        # Create a special debug info event instead of misusing ERROR
         debug_info = {
             'total_points': len(self.calibration_points),
+            'dimensions': '2D',
             'points_detail': []
         }
 
@@ -652,7 +509,6 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
             }
             debug_info['points_detail'].append(point_detail)
 
-        # Emit as a debug info event rather than error
         self.emit(RegistrationEvents.DEBUG_INFO, debug_info)
 
     def get_transformation_info(self) -> dict:
@@ -660,7 +516,8 @@ class RegistrationManager(IRegistrationComputation, IRegistrationDataManager, IR
         info = {
             'is_registered': self.is_registered(),
             'point_count': len(self.calibration_points),
-            'registration_error': self._registration_error
+            'registration_error': self._registration_error,
+            'dimensions': '2D'
         }
 
         if self.is_registered():
