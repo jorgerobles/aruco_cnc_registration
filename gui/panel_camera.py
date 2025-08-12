@@ -1,6 +1,7 @@
+# gui/panel_camera.py - Updated with configuration synchronization
 """
 Enhanced Camera Panel with integrated FOV calculation using Camera Manager
-Simplified version - FOV tab removed, Auto FOV button kept on camera tab
+Updated to synchronize with configuration system
 """
 
 import threading
@@ -10,11 +11,13 @@ from typing import Callable, Optional
 
 from services.camera_manager import CameraEvents
 from services.event_broker import event_aware, event_handler, EventPriority
+from services.configuration_service import ConfigurationServiceEvents
+from services.configuration_manager import ConfigurationEvents
 
 
 @event_aware()
 class CameraPanel:
-    """Enhanced camera panel with integrated FOV calculation using Camera Manager"""
+    """Enhanced camera panel with configuration synchronization"""
 
     def __init__(self, parent, camera_manager, hardware_service, logger: Optional[Callable] = None, marker_length=15.0):
         self.camera_manager = camera_manager
@@ -36,14 +39,14 @@ class CameraPanel:
         self.offset_y_var = tk.DoubleVar(value=0.0)
         self.offset_z_var = tk.DoubleVar(value=0.0)
 
-        # FOV status variables (simplified)
+        # FOV status variables
         self.fov_status_var = tk.StringVar(value="No FOV data")
 
-        # Setup UI with simplified structure
+        # Setup UI
         self._setup_widgets()
         self._set_calibration_controls_enabled(False)
 
-        self.log("Enhanced Camera Panel with FOV integration initialized", "info")
+        self.log("Enhanced Camera Panel with configuration sync initialized", "info")
 
     def set_logger(self, logger: Callable):
         """Set logger after initialization"""
@@ -57,23 +60,23 @@ class CameraPanel:
             print(f"[{level.upper()}] CameraPanel: {message}")
 
     def _setup_widgets(self):
-        """Setup UI with simplified tabbed interface"""
-        # Create notebook for tabs (Camera and Offset only)
+        """Setup UI with tabbed interface"""
+        # Create notebook for tabs
         notebook = ttk.Notebook(self.frame)
         notebook.pack(fill=tk.BOTH, expand=True, pady=5)
 
-        # Tab 1: Camera Connection & Calibration (with FOV button)
+        # Camera tab
         camera_tab = ttk.Frame(notebook)
         notebook.add(camera_tab, text="Camera")
         self._setup_camera_tab(camera_tab)
 
-        # Tab 2: Camera Offset
+        # Offset tab
         offset_tab = ttk.Frame(notebook)
         notebook.add(offset_tab, text="Offset")
         self._setup_offset_tab(offset_tab)
 
     def _setup_camera_tab(self, parent):
-        """Setup camera connection and calibration tab with FOV integration"""
+        """Setup camera connection and calibration tab"""
         # Camera Connection Section
         conn_frame = ttk.LabelFrame(parent, text="Camera Connection")
         conn_frame.pack(fill=tk.X, pady=5, padx=5)
@@ -83,7 +86,10 @@ class CameraPanel:
         cam_row.pack(fill=tk.X, pady=2, padx=3)
 
         ttk.Label(cam_row, text="Camera:").pack(side=tk.LEFT)
-        ttk.Entry(cam_row, textvariable=self.camera_id_var, width=5).pack(side=tk.LEFT, padx=(2, 0))
+        
+        # Camera ID entry - this is the field that needs to be updated
+        self.camera_id_entry = ttk.Entry(cam_row, textvariable=self.camera_id_var, width=5)
+        self.camera_id_entry.pack(side=tk.LEFT, padx=(2, 0))
 
         self.cam_status_label = ttk.Label(cam_row, textvariable=self.camera_status_var,
                                           foreground="red", font=("TkDefaultFont", 8))
@@ -113,47 +119,44 @@ class CameraPanel:
         marker_row.pack(fill=tk.X, pady=2, padx=3)
 
         ttk.Label(marker_row, text="Marker Size:").pack(side=tk.LEFT)
-        self.marker_length_entry = ttk.Entry(marker_row, textvariable=self.marker_length_var, width=6)
+        self.marker_length_entry = ttk.Entry(marker_row, textvariable=self.marker_length_var, width=8)
         self.marker_length_entry.pack(side=tk.LEFT, padx=(2, 0))
-        ttk.Label(marker_row, text="mm").pack(side=tk.LEFT, padx=(1, 5))
+        ttk.Label(marker_row, text="mm").pack(side=tk.LEFT, padx=(2, 5))
 
-        # Auto FOV calculation button (kept here as requested)
+        # Auto FOV button - integrated into camera tab
         ttk.Button(marker_row, text="Auto FOV", command=self.calculate_fov_auto, width=8).pack(side=tk.LEFT, padx=(5, 0))
 
-        # Calibration status and buttons row
+        # Calibration file row
+        calib_file_row = ttk.Frame(calib_frame)
+        calib_file_row.pack(fill=tk.X, pady=2, padx=3)
+
+        self.calib_status_label = ttk.Label(calib_file_row, textvariable=self.calibration_file_var,
+                                           foreground="gray", font=("TkDefaultFont", 8))
+        self.calib_status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Calibration buttons row
         calib_btn_row = ttk.Frame(calib_frame)
         calib_btn_row.pack(fill=tk.X, pady=2, padx=3)
 
-        self.calib_status_label = ttk.Label(calib_btn_row, textvariable=self.calibration_file_var,
-                                            foreground="red", font=("TkDefaultFont", 7))
-        self.calib_status_label.pack(side=tk.LEFT, padx=(0, 5))
-
         self.load_calib_btn = ttk.Button(calib_btn_row, text="Load Calibration",
-                                         command=self.load_calibration, width=14)
+                                        command=self.load_calibration, width=12)
         self.load_calib_btn.pack(side=tk.LEFT, padx=(0, 2))
 
-        self.info_btn = ttk.Button(calib_btn_row, text="Info",
-                                   command=self._show_camera_info, width=6)
+        self.info_btn = ttk.Button(calib_btn_row, text="Info", command=self._log_calibration_info, width=6)
         self.info_btn.pack(side=tk.LEFT)
 
-        # FOV Status Display (simplified, single line)
-        fov_status_frame = ttk.Frame(calib_frame)
-        fov_status_frame.pack(fill=tk.X, pady=2, padx=3)
+        # FOV status row (simplified)
+        fov_row = ttk.Frame(calib_frame)
+        fov_row.pack(fill=tk.X, pady=(5, 2), padx=3)
 
-        self.fov_status_label = ttk.Label(fov_status_frame, textvariable=self.fov_status_var,
-                                          font=("TkDefaultFont", 8), foreground="blue")
-        self.fov_status_label.pack(anchor=tk.W)
+        ttk.Label(fov_row, text="FOV:").pack(side=tk.LEFT)
+        ttk.Label(fov_row, textvariable=self.fov_status_var, foreground="blue",
+                 font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=(5, 0))
 
     def _setup_offset_tab(self, parent):
         """Setup camera offset configuration tab"""
-        # Info label
-        info_label = ttk.Label(parent,
-                              text="Camera offset from machine spindle/tool position (mm)",
-                              font=("TkDefaultFont", 8), foreground="gray")
-        info_label.pack(pady=(10, 20))
-
-        # Offset inputs
-        offset_frame = ttk.Frame(parent)
+        # Offset input section
+        offset_frame = ttk.LabelFrame(parent, text="Camera Offset from Spindle")
         offset_frame.pack(pady=10)
 
         # X offset
@@ -189,75 +192,6 @@ class CameraPanel:
         self.marker_length_entry.config(state=state)
         self.load_calib_btn.config(state=state)
         self.info_btn.config(state=state)
-
-    # === EVENT HANDLERS ===
-
-    @event_handler(CameraEvents.CONNECTED, EventPriority.HIGH)
-    def on_camera_connected(self, success: bool):
-        """Handle camera connection event"""
-        if success:
-            self.camera_status_var.set("Connected")
-            self.cam_status_label.config(foreground="green")
-            self.camera_connect_btn.config(state=tk.DISABLED)
-            self.camera_disconnect_btn.config(state=tk.NORMAL)
-            self._set_calibration_controls_enabled(True)
-
-            # Update hardware service
-            self.hardware_service.set_has_camera(True)
-            self._log_calibration_info()
-        else:
-            self.camera_status_var.set("Failed")
-            self.cam_status_label.config(foreground="red")
-            self.camera_connect_btn.config(state=tk.NORMAL)
-            self.camera_disconnect_btn.config(state=tk.DISABLED)
-            self._set_calibration_controls_enabled(False)
-
-    @event_handler(CameraEvents.DISCONNECTED, EventPriority.HIGH)
-    def on_camera_disconnected(self):
-        """Handle camera disconnection event"""
-        self.camera_status_var.set("Disconnected")
-        self.cam_status_label.config(foreground="red")
-        self.camera_connect_btn.config(state=tk.NORMAL)
-        self.camera_disconnect_btn.config(state=tk.DISABLED)
-        self._set_calibration_controls_enabled(False)
-
-        # Update hardware service
-        self.hardware_service.set_has_camera(False)
-
-        # Clear FOV data
-        self.fov_status_var.set("No FOV data")
-
-    @event_handler(CameraEvents.CALIBRATION_LOADED, EventPriority.NORMAL)
-    def on_calibration_loaded(self, file_path: str):
-        """Handle calibration loaded event"""
-        filename = file_path.split('/')[-1]
-        if len(filename) > 20:
-            filename = filename[:17] + "..."
-        self.calibration_file_var.set(f"✓ {filename}")
-        self.calib_status_label.config(foreground="green")
-        self._log_calibration_info()
-
-    @event_handler(CameraEvents.ERROR, EventPriority.NORMAL)
-    def on_camera_error(self, error_message: str):
-        """Handle camera error events"""
-        self.log(f"Camera error: {error_message}", "error")
-
-    # FOV event handlers (simplified)
-    @event_handler(CameraEvents.FOV_CALCULATED, EventPriority.NORMAL)
-    def on_fov_calculated(self, fov_data: dict):
-        """Handle FOV calculation events"""
-        width = fov_data.get('width_mm', 0)
-        height = fov_data.get('height_mm', 0)
-        distance = fov_data.get('distance_mm', 0)
-
-        self.fov_status_var.set(f"FOV: {width:.1f}×{height:.1f}mm @ {distance:.1f}mm")
-        self.log(f"FOV calculated: {width:.1f}×{height:.1f}mm @ {distance:.1f}mm")
-
-    @event_handler(CameraEvents.FOV_UPDATED, EventPriority.NORMAL)
-    def on_fov_updated(self, fov_data):
-        """Handle FOV data updates"""
-        if fov_data is None:
-            self.fov_status_var.set("FOV data cleared")
 
     # === CAMERA CONNECTION METHODS ===
 
@@ -321,14 +255,10 @@ class CameraPanel:
             if self.camera_manager.is_connected:
                 info = self.camera_manager.get_camera_info()
                 offset = self.hardware_service.get_camera_offset()
-                fov = info.get('fov')
 
                 log_msg = f"Camera: ID={info['camera_id']}, {info['width']}x{info['height']}, "
                 log_msg += f"Cal={'Yes' if info['calibrated'] else 'No'}, "
                 log_msg += f"Offset=[{offset['x']:.1f},{offset['y']:.1f},{offset['z']:.1f}]"
-
-                if fov:
-                    log_msg += f", FOV={fov['width_mm']:.1f}×{fov['height_mm']:.1f}mm"
 
                 self.log(log_msg)
             else:
@@ -351,51 +281,14 @@ class CameraPanel:
         except Exception as e:
             self.log(f"Test error: {e}", "error")
 
-    def _show_camera_info(self):
-        """Show comprehensive camera information dialog"""
-        try:
-            if self.camera_manager.is_connected:
-                info = self.camera_manager.get_camera_info()
-                offset = self.hardware_service.get_camera_offset()
-                fov = info.get('fov')
-
-                info_text = f"""Camera ID: {info.get('camera_id', 'Unknown')}
-Resolution: {info.get('width', '?')}x{info.get('height', '?')}
-Calibrated: {'Yes' if info.get('calibrated', False) else 'No'}
-Marker Size: {self.marker_length_var.get():.1f} mm
-
-Camera Offset:
-  X: {offset['x']:.2f} mm
-  Y: {offset['y']:.2f} mm  
-  Z: {offset['z']:.2f} mm"""
-
-                if fov:
-                    info_text += f"""
-
-Field of View:
-  Size: {fov['width_mm']:.1f} × {fov['height_mm']:.1f} mm
-  Distance: {fov['distance_mm']:.1f} mm
-  Resolution: {fov['pixels_per_mm']:.2f} px/mm
-  Method: {fov.get('calculated_from', 'unknown')}"""
-                else:
-                    info_text += "\n\nField of View: Not calculated"
-
-                info_text += f"\n\nStatus: {'Ready for precise positioning' if (info.get('calibrated', False) and fov) else 'Calculate FOV for precision'}"
-
-                messagebox.showinfo("Camera Info", info_text)
-            else:
-                messagebox.showwarning("Camera Info", "Camera not connected")
-        except Exception as e:
-            messagebox.showerror("Error", f"Error: {e}")
-
     # === CALIBRATION METHODS ===
 
     def load_calibration(self):
-        """Load camera calibration"""
+        """Load camera calibration file"""
         try:
             file_path = filedialog.askopenfilename(
                 title="Load Camera Calibration",
-                filetypes=[("NumPy files", "*.npz"), ("All files", "*.*")]
+                filetypes=[("NumPy Archive", "*.npz"), ("All files", "*.*")]
             )
             if file_path:
                 success = self.camera_manager.load_calibration(file_path)
@@ -442,7 +335,7 @@ Field of View:
         self.offset_z_var.set(0.0)
         self.apply_offset()
 
-    # === FOV CALCULATION METHODS (simplified) ===
+    # === FOV CALCULATION METHODS ===
 
     def calculate_fov_auto(self):
         """Calculate FOV automatically using camera manager"""
@@ -465,130 +358,177 @@ Field of View:
                 return
 
             # Show results
+            width_mm = fov_data['width_mm']
+            height_mm = fov_data['height_mm']
+            distance_mm = fov_data['distance_mm']
+            
             info_text = f"""FOV Calculated Successfully!
 
-Field of View: {fov_data['width_mm']:.1f} × {fov_data['height_mm']:.1f} mm
-Distance to marker: {fov_data['distance_mm']:.1f} mm
+Field of View: {width_mm:.1f} × {height_mm:.1f} mm
+Camera Distance: {distance_mm:.1f} mm
 Pixels per mm: {fov_data['pixels_per_mm']:.2f}
-Marker ID: {fov_data.get('marker_id', 'N/A')}
+Resolution: {fov_data['frame_resolution'][0]}×{fov_data['frame_resolution'][1]}
 
-The camera manager will now use this FOV data for precise marker positioning."""
+This FOV data will be used for coordinate transformations."""
 
-            messagebox.showinfo("FOV Calculation Complete", info_text)
+            messagebox.showinfo("FOV Calculation", info_text)
+            self.log(f"FOV calculated: {width_mm:.1f}×{height_mm:.1f}mm @ {distance_mm:.1f}mm")
 
         except Exception as e:
-            self.log(f"FOV calculation error: {e}", "error")
             messagebox.showerror("Error", f"FOV calculation failed: {e}")
+            self.log(f"FOV calculation error: {e}", "error")
 
-    # === UTILITY METHODS ===
+    # === CONFIGURATION SYNC METHODS ===
 
-    def get_marker_length(self) -> float:
-        """Get current marker length setting"""
-        return self.marker_length_var.get()
+    def update_from_configuration(self, config):
+        """Update camera panel UI from configuration"""
+        try:
+            if config and config.camera:
+                # Update camera connection settings
+                self.camera_id_var.set(str(config.camera.camera_id))
+                
+                # Update marker length
+                self.marker_length_var.set(config.camera.marker_length_mm)
+                
+                # Update calibration file if available
+                if config.camera.calibration_file:
+                    import os
+                    if os.path.exists(config.camera.calibration_file):
+                        filename = os.path.basename(config.camera.calibration_file)
+                        if len(filename) > 20:
+                            filename = filename[:17] + "..."
+                        self.calibration_file_var.set(f"✓ {filename}")
+                        self.calib_status_label.config(foreground="green")
+                    else:
+                        self.calibration_file_var.set("❌ File not found")
+                        self.calib_status_label.config(foreground="red")
+                else:
+                    self.calibration_file_var.set("No calibration")
+                    self.calib_status_label.config(foreground="gray")
+                
+                # Update camera manager with new camera ID (but don't auto-connect)
+                self.camera_manager.camera_id = config.camera.camera_id
+                
+                # Update camera manager resolution
+                self.camera_manager.resolution = (
+                    config.camera.resolution_width, 
+                    config.camera.resolution_height
+                )
+                
+                self.log(f"Camera panel updated from configuration: ID={config.camera.camera_id}, "
+                        f"Resolution={config.camera.resolution_width}x{config.camera.resolution_height}, "
+                        f"Marker={config.camera.marker_length_mm}mm")
+                
+        except Exception as e:
+            self.log(f"Error updating camera panel from configuration: {e}", "error")
 
-    def set_marker_length(self, length: float):
-        """Set marker length"""
-        self.marker_length_var.set(length)
+    def update_hardware_offset_from_configuration(self, config):
+        """Update camera offset UI from hardware configuration"""
+        try:
+            if config and config.hardware:
+                self.offset_x_var.set(config.hardware.camera_offset_x)
+                self.offset_y_var.set(config.hardware.camera_offset_y)
+                self.offset_z_var.set(config.hardware.camera_offset_z)
+                
+                # Update the display
+                self.offset_display.config(
+                    text=f"Current: X{config.hardware.camera_offset_x:.1f} "
+                         f"Y{config.hardware.camera_offset_y:.1f} "
+                         f"Z{config.hardware.camera_offset_z:.1f} mm"
+                )
+                
+                self.log(f"Camera offset updated from configuration: "
+                        f"[{config.hardware.camera_offset_x:.1f}, "
+                        f"{config.hardware.camera_offset_y:.1f}, "
+                        f"{config.hardware.camera_offset_z:.1f}]")
+                
+        except Exception as e:
+            self.log(f"Error updating camera offset from configuration: {e}", "error")
+
+    # === EVENT HANDLERS ===
+
+    @event_handler(CameraEvents.CONNECTED, EventPriority.HIGH)
+    def on_camera_connected(self, success: bool):
+        """Handle camera connection event"""
+        if success:
+            self.camera_status_var.set("Connected")
+            self.cam_status_label.config(foreground="green")
+            self.camera_connect_btn.config(state=tk.DISABLED)
+            self.camera_disconnect_btn.config(state=tk.NORMAL)
+            self._set_calibration_controls_enabled(True)
+
+            # Update hardware service
+            self.hardware_service.set_has_camera(True)
+            self._log_calibration_info()
+        else:
+            self.camera_status_var.set("Failed")
+            self.cam_status_label.config(foreground="red")
+            self.camera_connect_btn.config(state=tk.NORMAL)
+            self.camera_disconnect_btn.config(state=tk.DISABLED)
+            self._set_calibration_controls_enabled(False)
+
+    @event_handler(CameraEvents.DISCONNECTED, EventPriority.HIGH)
+    def on_camera_disconnected(self):
+        """Handle camera disconnection event"""
+        self.camera_status_var.set("Disconnected")
+        self.cam_status_label.config(foreground="red")
+        self.camera_connect_btn.config(state=tk.NORMAL)
+        self.camera_disconnect_btn.config(state=tk.DISABLED)
+        self._set_calibration_controls_enabled(False)
+
+        # Update hardware service
+        self.hardware_service.set_has_camera(False)
+
+        # Clear FOV data
+        self.fov_status_var.set("No FOV data")
+
+    @event_handler(CameraEvents.CALIBRATION_LOADED, EventPriority.NORMAL)
+    def on_calibration_loaded(self, file_path: str):
+        """Handle calibration loaded event"""
+        filename = file_path.split('/')[-1]
+        if len(filename) > 20:
+            filename = filename[:17] + "..."
+        self.calibration_file_var.set(f"✓ {filename}")
+        self.calib_status_label.config(foreground="green")
         self._log_calibration_info()
 
-    def is_camera_ready(self) -> bool:
-        """Check if camera is connected"""
-        return self.camera_manager.is_connected
+    @event_handler(CameraEvents.ERROR, EventPriority.NORMAL)
+    def on_camera_error(self, error_message: str):
+        """Handle camera error events"""
+        self.log(f"Camera error: {error_message}", "error")
 
-    def is_calibrated(self) -> bool:
-        """Check if camera is calibrated"""
-        return self.camera_manager.is_calibrated() if self.camera_manager.is_connected else False
+    @event_handler(CameraEvents.FOV_CALCULATED, EventPriority.NORMAL)
+    def on_fov_calculated(self, fov_data: dict):
+        """Handle FOV calculation events"""
+        width = fov_data.get('width_mm', 0)
+        height = fov_data.get('height_mm', 0)
+        distance = fov_data.get('distance_mm', 0)
 
-    def has_fov_data(self) -> bool:
-        """Check if FOV data is available"""
-        return self.camera_manager.get_current_fov() is not None
+        self.fov_status_var.set(f"FOV: {width:.1f}×{height:.1f}mm @ {distance:.1f}mm")
+        self.log(f"FOV calculated: {width:.1f}×{height:.1f}mm @ {distance:.1f}mm")
 
-    def get_calibration_status(self) -> dict:
-        """Get current calibration status including FOV"""
-        offset = self.hardware_service.get_camera_offset()
-        fov_data = self.camera_manager.get_current_fov()
+    @event_handler(CameraEvents.FOV_UPDATED, EventPriority.NORMAL)
+    def on_fov_updated(self, fov_data):
+        """Handle FOV data updates"""
+        if fov_data is None:
+            self.fov_status_var.set("FOV data cleared")
 
-        status = {
-            'camera_connected': self.camera_manager.is_connected,
-            'camera_calibrated': self.is_calibrated(),
-            'marker_length': self.get_marker_length(),
-            'camera_offset': offset,
-            'has_fov_data': fov_data is not None,
-            'controls_enabled': self.load_calib_btn['state'] == 'normal',
-            'camera_id': self.camera_id_var.get()
-        }
+    # === CONFIGURATION EVENT HANDLERS ===
 
-        if fov_data:
-            status['fov_data'] = {
-                'width_mm': fov_data['width_mm'],
-                'height_mm': fov_data['height_mm'],
-                'distance_mm': fov_data['distance_mm'],
-                'pixels_per_mm': fov_data['pixels_per_mm']
-            }
+    @event_handler(ConfigurationServiceEvents.APPLIED, EventPriority.NORMAL)
+    def _on_configuration_applied(self, event_data):
+        """Handle configuration applied event - update UI"""
+        config = event_data.get('config')
+        if config:
+            self.update_from_configuration(config)
+            self.update_hardware_offset_from_configuration(config)
+            self.log("Camera panel synchronized with new configuration")
 
-        return status
-
-    def get_camera_fov(self) -> dict:
-        """Get current camera FOV settings for backward compatibility"""
-        fov_data = self.camera_manager.get_current_fov()
-
-        if fov_data:
-            return {
-                'width_mm': fov_data['width_mm'],
-                'height_mm': fov_data['height_mm'],
-                'working_height_mm': fov_data['distance_mm']
-            }
-        else:
-            # Return default values if no FOV data
-            return {
-                'width_mm': 100.0,
-                'height_mm': 75.0,
-                'working_height_mm': 50.0
-            }
-
-    def refresh_fov_display(self):
-        """Refresh FOV display elements"""
-        try:
-            fov_data = self.camera_manager.get_current_fov()
-
-            if fov_data:
-                self.fov_status_var.set(f"FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm @ {fov_data['distance_mm']:.1f}mm")
-            else:
-                self.fov_status_var.set("No FOV data")
-
-        except Exception as e:
-            self.log(f"Error refreshing FOV display: {e}", "error")
-
-    def validate_setup(self) -> dict:
-        """Validate complete camera setup"""
-        issues = []
-        warnings = []
-
-        # Check camera connection
-        if not self.camera_manager.is_connected:
-            issues.append("Camera not connected")
-
-        # Check calibration
-        if not self.is_calibrated():
-            issues.append("Camera not calibrated")
-
-        # Check FOV data
-        if not self.has_fov_data():
-            warnings.append("No FOV data - precision may be reduced")
-
-        # Check marker size
-        if self.get_marker_length() <= 0:
-            issues.append("Invalid marker size")
-
-        return {
-            'valid': len(issues) == 0,
-            'ready_for_precision': len(issues) == 0 and self.has_fov_data(),
-            'issues': issues,
-            'warnings': warnings,
-            'summary': {
-                'camera_connected': self.camera_manager.is_connected,
-                'camera_calibrated': self.is_calibrated(),
-                'has_fov_data': self.has_fov_data(),
-                'marker_size': self.get_marker_length()
-            }
-        }
+    @event_handler(ConfigurationEvents.LOADED, EventPriority.NORMAL) 
+    def _on_configuration_loaded(self, event_data):
+        """Handle configuration loaded event - update UI"""
+        config = event_data.get('config')
+        if config:
+            self.update_from_configuration(config)
+            self.update_hardware_offset_from_configuration(config)
+            self.log("Camera panel synchronized with loaded configuration")
