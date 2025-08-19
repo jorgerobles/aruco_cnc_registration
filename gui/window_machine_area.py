@@ -84,7 +84,8 @@ class MachineAreaWindow:
                 self.machine_bounds = bounds.copy()
 
                 origin_name = self.hardware_service.get_machine_origin_name()
-                self.log(f"BOUNDS UPDATE: Origin={origin_name}, Bounds=X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
+                self.log(
+                    f"BOUNDS UPDATE: Origin={origin_name}, Bounds=X({bounds['x_min']:.0f},{bounds['x_max']:.0f}) Y({bounds['y_min']:.0f},{bounds['y_max']:.0f})")
 
                 # Update canvas if it exists
                 if self.canvas_component:
@@ -315,7 +316,9 @@ class MachineAreaWindow:
             'center_view': self.center_view,
             'update_camera_info': self.update_camera_info,
             'calculate_fov': self.calculate_fov,  # NEW: FOV calculation callback
-            'debug_show_data': self.debug_show_data
+            'debug_show_data': self.debug_show_data,
+            'toggle_triangles': self.toggle_triangle_debug,
+            'toggle_errors': self.toggle_error_vectors
         }
 
         for name, callback in callbacks.items():
@@ -421,7 +424,8 @@ class MachineAreaWindow:
         if self.camera_manager:
             fov_data = self.camera_manager.get_current_fov()
             if fov_data:
-                debug_info.append(f"FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm @ {fov_data['distance_mm']:.1f}mm [Source: {fov_data.get('calculated_from', 'unknown')}]")
+                debug_info.append(
+                    f"FOV: {fov_data['width_mm']:.1f}×{fov_data['height_mm']:.1f}mm @ {fov_data['distance_mm']:.1f}mm [Source: {fov_data.get('calculated_from', 'unknown')}]")
             else:
                 debug_info.append("FOV: No data from camera manager")
 
@@ -567,8 +571,6 @@ class MachineAreaWindow:
                 frame_height_mm = fov_data['height_mm']
                 pixels_per_mm = fov_data['pixels_per_mm']
 
-
-
                 self.camera_frame_bounds = {
                     'x_min': cam_x - frame_width_mm / 2,
                     'x_max': cam_x + frame_width_mm / 2,
@@ -701,6 +703,10 @@ class MachineAreaWindow:
 
             if display_options['show_camera_position'] and self.current_camera_position:
                 self.canvas_component.draw_camera_position(self.current_camera_position)
+
+            if hasattr(self.controls_component,
+                       'show_triangles_var') and self.controls_component.show_triangles_var.get():
+                self.enable_triangle_debug_mode()
 
             # Update status
             self.update_status_display()
@@ -1008,3 +1014,28 @@ class MachineAreaWindow:
         except Exception as e:
             self.log(f"Error getting destination triangle: {e}", "error")
             return None
+
+    def toggle_triangle_debug(self):
+        """Toggle triangle debug visualization on/off"""
+        try:
+            if self.controls_component.show_triangles_var.get():
+                # Enable triangle debug mode
+                self.enable_triangle_debug_mode()
+            else:
+                # Disable - just redraw without triangles
+                self.update_display()
+
+        except Exception as e:
+            self.log(f"Error toggling triangle debug: {e}", "error")
+
+    def toggle_error_vectors(self):
+        """Toggle error vector visualization on/off"""
+        try:
+            if self.controls_component.show_errors_var.get():
+                # TODO: Implement error vector visualization
+                self.log("Error vector visualization not yet implemented", "warning")
+            else:
+                self.update_display()
+
+        except Exception as e:
+            self.log(f"Error toggling error vectors: {e}", "error")
