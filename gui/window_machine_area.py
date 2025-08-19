@@ -939,8 +939,13 @@ class MachineAreaWindow:
         except Exception as e:
             self.log(f"Error enabling triangle debug mode: {e}", "error")
 
+    # Fixed _get_source_triangle_from_routes for MachineAreaWindow
+
     def _get_source_triangle_from_routes(self):
-        """Extract source triangle from route bounds"""
+        """
+        Extract source triangle from route bounding box.
+        Uses the actual bounding box corners, not searching for nearest vertices.
+        """
         try:
             if not self.routes_service or not self.routes_service.is_loaded():
                 return None
@@ -949,7 +954,7 @@ class MachineAreaWindow:
             if not routes:
                 return None
 
-            # Find actual outermost vertices (as per the fixed RouteTransformer logic)
+            # Collect all points from all routes
             all_points = []
             for route in routes:
                 all_points.extend(route)
@@ -959,57 +964,81 @@ class MachineAreaWindow:
 
             all_points = np.array(all_points)
 
-            # Find the actual extreme points
-            # Bottom-left: minimize x+y
-            bottom_left_idx = np.argmin(all_points[:, 0] + all_points[:, 1])
-            bottom_left = all_points[bottom_left_idx]
+            # Calculate the actual bounding box
+            min_x = np.min(all_points[:, 0])
+            max_x = np.max(all_points[:, 0])
+            min_y = np.min(all_points[:, 1])
+            max_y = np.max(all_points[:, 1])
 
-            # Bottom-right: bottom points, then rightmost
-            y_threshold = np.percentile(all_points[:, 1], 25)
-            bottom_points = all_points[all_points[:, 1] <= y_threshold]
-            bottom_right_idx = np.argmax(bottom_points[:, 0])
-            bottom_right = bottom_points[bottom_right_idx]
+            # Create triangle using actual bounding box corners
+            # Use three corners that form a right triangle
+            bottom_left = (min_x, min_y)  # Bottom-left corner
+            bottom_right = (max_x, min_y)  # Bottom-right corner
+            top_right = (max_x, max_y)  # Top-right corner (forms right angle at bottom-right)
 
-            # Top-left: top points, then leftmost
-            y_threshold = np.percentile(all_points[:, 1], 75)
-            top_points = all_points[all_points[:, 1] >= y_threshold]
-            top_left_idx = np.argmin(top_points[:, 0])
-            top_left = top_points[top_left_idx]
-
-            return [tuple(bottom_left), tuple(bottom_right), tuple(top_left)]
+            # Return in consistent order
+            return [bottom_left, bottom_right, top_right]
 
         except Exception as e:
             self.log(f"Error getting source triangle: {e}", "error")
             return None
 
     def _get_destination_triangle_from_calibration(self):
-        """Extract destination triangle from calibration points"""
+        """
+        Extract destination triangle from calibration points.
+        Orders them to match the source triangle pattern (bottom-left, bottom-right, top-right).
+        """
         try:
             if not self.calibration_points or len(self.calibration_points) < 3:
                 return None
 
             # Get first 3 calibration points
-            points = self.calibration_points[:3]
+            points = np.array(self.calibration_points[:3])
 
-            # Reorder to match expected pattern (bottom-left, bottom-right, top-left)
-            points_array = np.array(points)
+            # Sort points to identify their positions
+            # First separate by Y coordinate (bottom vs top)
+            y_sorted_indices = np.argsort(points[:, 1])
 
-            # Sort by Y to separate bottom from top
-            y_sorted_indices = np.argsort(points_array[:, 1])
+            # If we have a clear top point (significantly higher Y)
+            y_values = points[:, 1]
+            y_range = np.max(y_values) - np.min(y_values)
 
-            # Get bottom two points
-            bottom_indices = y_sorted_indices[:2]
-            top_index = y_sorted_indices[2]
+            if y_range > 10:  # Significant Y difference
+                # Identify bottom points (lower Y values)
+                bottom_mask = points[:, 1] < (np.min(y_values) + y_range * 0.5)
+                bottom_indices = np.where(bottom_mask)[0]
+                top_indices = np.where(~bottom_mask)[0]
 
-            bottom_points = points_array[bottom_indices]
+                if len(bottom_indices) >= 2 and len(top_indices) >= 1:
+                    # Get bottom points and sort by X
+                    bottom_points = points[bottom_indices]
+                    bottom_x_sorted = np.argsort(bottom_points[:, 0])
 
-            # Sort bottom points by X
-            x_sorted = np.argsort(bottom_points[:, 0])
-            bottom_left = bottom_points[x_sorted[0]]
-            bottom_right = bottom_points[x_sorted[1]]
-            top_left = points_array[top_index]
+                    bottom_left = bottom_points[bottom_x_sorted[0]]
+                    bottom_right = bottom_points[bottom_x_sorted[1]]
 
-            return [tuple(bottom_left), tuple(bottom_right), tuple(top_left)]
+                    # Get top point
+                    top_point = points[top_indices[0]]
+
+                    # Return in order matching source triangle
+                    return [tuple(bottom_left), tuple(bottom_right), tuple(top_point)]
+
+            # Fallback: use simple sorting
+            # Sort all points by Y, then by X
+            sorted_indices = np.lexsort((points[:, 0], points[:, 1]))
+            sorted_points = points[sorted_indices]
+
+            # Assume first two are bottom points
+            if sorted_points[0, 0] < sorted_points[1, 0]:
+                bottom_left = sorted_points[0]
+                bottom_right = sorted_points[1]
+            else:
+                bottom_left = sorted_points[1]
+                bottom_right = sorted_points[0]
+
+            top_point = sorted_points[2]
+
+            return [tuple(bottom_left), tuple(bottom_right), tuple(top_point)]
 
         except Exception as e:
             self.log(f"Error getting destination triangle: {e}", "error")
