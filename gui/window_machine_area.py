@@ -945,6 +945,7 @@ class MachineAreaWindow:
         """
         Extract source triangle from route bounding box.
         Uses the actual bounding box corners, not searching for nearest vertices.
+        FIXED: Now uses top-LEFT to match route transformer and destination triangle
         """
         try:
             if not self.routes_service or not self.routes_service.is_loaded():
@@ -971,13 +972,13 @@ class MachineAreaWindow:
             max_y = np.max(all_points[:, 1])
 
             # Create triangle using actual bounding box corners
-            # Use three corners that form a right triangle
+            # FIXED: Use top-LEFT instead of top-RIGHT to match system convention
             bottom_left = (min_x, min_y)  # Bottom-left corner
             bottom_right = (max_x, min_y)  # Bottom-right corner
-            top_right = (max_x, max_y)  # Top-right corner (forms right angle at bottom-right)
+            top_left = (min_x, max_y)  # Top-LEFT corner (FIXED: was max_x, now min_x)
 
-            # Return in consistent order
-            return [bottom_left, bottom_right, top_right]
+            # Return in consistent order: [bottom-left, bottom-right, top-left]
+            return [bottom_left, bottom_right, top_left]
 
         except Exception as e:
             self.log(f"Error getting source triangle: {e}", "error")
@@ -986,7 +987,7 @@ class MachineAreaWindow:
     def _get_destination_triangle_from_calibration(self):
         """
         Extract destination triangle from calibration points.
-        Orders them to match the source triangle pattern (bottom-left, bottom-right, top-right).
+        FIXED: Orders them to match the corrected source triangle pattern (bottom-left, bottom-right, top-left).
         """
         try:
             if not self.calibration_points or len(self.calibration_points) < 3:
@@ -1017,10 +1018,11 @@ class MachineAreaWindow:
                     bottom_left = bottom_points[bottom_x_sorted[0]]
                     bottom_right = bottom_points[bottom_x_sorted[1]]
 
-                    # Get top point
+                    # Get top point - should be the leftmost top point for consistency
                     top_point = points[top_indices[0]]
 
-                    # Return in order matching source triangle
+                    # FIXED: Return in order matching corrected source triangle
+                    # [bottom-left, bottom-right, top-left]
                     return [tuple(bottom_left), tuple(bottom_right), tuple(top_point)]
 
             # Fallback: use simple sorting
@@ -1038,6 +1040,7 @@ class MachineAreaWindow:
 
             top_point = sorted_points[2]
 
+            # FIXED: Return consistent order [bottom-left, bottom-right, top-left]
             return [tuple(bottom_left), tuple(bottom_right), tuple(top_point)]
 
         except Exception as e:
