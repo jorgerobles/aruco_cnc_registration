@@ -909,3 +909,102 @@ class MachineAreaWindow:
 
         except Exception as e:
             self.log(f"Error updating status display: {e}", "error")
+
+    def enable_triangle_debug_mode(self):
+        """Enable triangle debug visualization mode"""
+        try:
+            if not self.canvas_component:
+                self.log("Canvas component not available", "error")
+                return
+
+            # Get source triangle from route bounds
+            source_triangle = self._get_source_triangle_from_routes()
+
+            # Get destination triangle from calibration points
+            dest_triangle = self._get_destination_triangle_from_calibration()
+
+            # Draw the triangles
+            if source_triangle or dest_triangle:
+                self.canvas_component.draw_transformation_triangles(source_triangle, dest_triangle)
+                self.log("Triangle debug visualization enabled")
+            else:
+                self.log("No triangles available for debug visualization", "warning")
+
+        except Exception as e:
+            self.log(f"Error enabling triangle debug mode: {e}", "error")
+
+    def _get_source_triangle_from_routes(self):
+        """Extract source triangle from route bounds"""
+        try:
+            if not self.routes_service or not self.routes_service.is_loaded():
+                return None
+
+            routes = self.routes_service.get_routes()
+            if not routes:
+                return None
+
+            # Find actual outermost vertices (as per the fixed RouteTransformer logic)
+            all_points = []
+            for route in routes:
+                all_points.extend(route)
+
+            if not all_points:
+                return None
+
+            all_points = np.array(all_points)
+
+            # Find the actual extreme points
+            # Bottom-left: minimize x+y
+            bottom_left_idx = np.argmin(all_points[:, 0] + all_points[:, 1])
+            bottom_left = all_points[bottom_left_idx]
+
+            # Bottom-right: bottom points, then rightmost
+            y_threshold = np.percentile(all_points[:, 1], 25)
+            bottom_points = all_points[all_points[:, 1] <= y_threshold]
+            bottom_right_idx = np.argmax(bottom_points[:, 0])
+            bottom_right = bottom_points[bottom_right_idx]
+
+            # Top-left: top points, then leftmost
+            y_threshold = np.percentile(all_points[:, 1], 75)
+            top_points = all_points[all_points[:, 1] >= y_threshold]
+            top_left_idx = np.argmin(top_points[:, 0])
+            top_left = top_points[top_left_idx]
+
+            return [tuple(bottom_left), tuple(bottom_right), tuple(top_left)]
+
+        except Exception as e:
+            self.log(f"Error getting source triangle: {e}", "error")
+            return None
+
+    def _get_destination_triangle_from_calibration(self):
+        """Extract destination triangle from calibration points"""
+        try:
+            if not self.calibration_points or len(self.calibration_points) < 3:
+                return None
+
+            # Get first 3 calibration points
+            points = self.calibration_points[:3]
+
+            # Reorder to match expected pattern (bottom-left, bottom-right, top-left)
+            points_array = np.array(points)
+
+            # Sort by Y to separate bottom from top
+            y_sorted_indices = np.argsort(points_array[:, 1])
+
+            # Get bottom two points
+            bottom_indices = y_sorted_indices[:2]
+            top_index = y_sorted_indices[2]
+
+            bottom_points = points_array[bottom_indices]
+
+            # Sort bottom points by X
+            x_sorted = np.argsort(bottom_points[:, 0])
+            bottom_left = bottom_points[x_sorted[0]]
+            bottom_right = bottom_points[x_sorted[1]]
+            top_left = points_array[top_index]
+
+            return [tuple(bottom_left), tuple(bottom_right), tuple(top_left)]
+
+        except Exception as e:
+            self.log(f"Error getting destination triangle: {e}", "error")
+            return None

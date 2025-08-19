@@ -205,6 +205,23 @@ class MachineAreaControls:
                         variable=self.debug_enabled_var).pack(anchor=tk.W, pady=2)
         ttk.Button(parent, text="Debug: Show Data", command=self.debug_show_data).pack(fill=tk.X, pady=2)
 
+        debug_frame = ttk.LabelFrame(parent, text="Debug Visualization")
+        debug_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        # Triangle debug toggle
+        self.show_triangles_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(debug_frame,
+                        text="Show transformation triangles",
+                        variable=self.show_triangles_var,
+                        command=lambda: self._call_callback('toggle_triangles')).pack(anchor=tk.W)
+
+        # Error vectors toggle
+        self.show_errors_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(debug_frame,
+                        text="Show alignment errors",
+                        variable=self.show_errors_var,
+                        command=lambda: self._call_callback('toggle_errors')).pack(anchor=tk.W)
+
     # Event handlers
     def on_display_option_changed(self):
         """Handle display option changes"""

@@ -507,3 +507,170 @@ class MachineAreaCanvas:
             'scale_factor': self.scale_factor,
             'machine_bounds': self.machine_bounds.copy()
         }
+
+    def draw_transformation_triangles(self, source_triangle=None, destination_triangle=None):
+        """
+        Draw source and destination triangles for transformation debug visualization
+
+        Args:
+            source_triangle: List of 3 points [(x1,y1), (x2,y2), (x3,y3)] from route bounds
+            destination_triangle: List of 3 points [(x1,y1), (x2,y2), (x3,y3)] from calibration
+        """
+        try:
+            # Draw source triangle (from route bounds)
+            if source_triangle and len(source_triangle) == 3:
+                self._draw_debug_triangle(source_triangle,
+                                          color='#00ff00',  # Green
+                                          label_prefix='S',
+                                          line_style='dashed')
+
+            # Draw destination triangle (from calibration points)
+            if destination_triangle and len(destination_triangle) == 3:
+                self._draw_debug_triangle(destination_triangle,
+                                          color='#ff00ff',  # Magenta
+                                          label_prefix='D',
+                                          line_style='solid')
+
+            # Draw correspondence lines if both triangles exist
+            if source_triangle and destination_triangle:
+                self._draw_correspondence_lines(source_triangle, destination_triangle)
+
+        except Exception as e:
+            if self.logger:
+                self.logger(f"Error drawing transformation triangles: {e}", "error")
+
+    def _draw_debug_triangle(self, triangle_points, color='#00ff00', label_prefix='T', line_style='solid'):
+        """
+        Draw a single debug triangle with labeled vertices
+
+        Args:
+            triangle_points: List of 3 (x,y) tuples in machine coordinates
+            color: Color for the triangle
+            label_prefix: Prefix for vertex labels (S for source, D for destination)
+            line_style: 'solid' or 'dashed'
+        """
+        # Convert points to canvas coordinates
+        canvas_points = []
+        for point in triangle_points:
+            cx, cy = self.machine_to_canvas(point[0], point[1])
+            canvas_points.append((cx, cy))
+
+        # Draw triangle edges
+        for i in range(3):
+            p1 = canvas_points[i]
+            p2 = canvas_points[(i + 1) % 3]
+
+            if line_style == 'dashed':
+                # Create dashed line
+                self.canvas.create_line(p1[0], p1[1], p2[0], p2[1],
+                                        fill=color, width=3, dash=(10, 5))
+            else:
+                # Solid line
+                self.canvas.create_line(p1[0], p1[1], p2[0], p2[1],
+                                        fill=color, width=3)
+
+        # Draw and label vertices
+        vertex_labels = ['BL', 'BR', 'TL']  # Bottom-Left, Bottom-Right, Top-Left
+        vertex_colors = ['#ff0000', '#00ff00', '#0000ff']  # Red, Green, Blue
+
+        for i, (canvas_point, machine_point) in enumerate(zip(canvas_points, triangle_points)):
+            cx, cy = canvas_point
+            mx, my = machine_point
+
+            # Draw vertex circle
+            radius = 8
+            self.canvas.create_oval(cx - radius, cy - radius,
+                                    cx + radius, cy + radius,
+                                    fill=vertex_colors[i],
+                                    outline=color, width=2)
+
+            # Add vertex label
+            label = f"{label_prefix}{i + 1}-{vertex_labels[i]}"
+            self.canvas.create_text(cx + 15, cy - 15,
+                                    text=label,
+                                    fill=color,
+                                    font=('Arial', 10, 'bold'),
+                                    anchor=tk.W)
+
+            # Add coordinate info
+            coord_text = f"({mx:.1f}, {my:.1f})"
+            self.canvas.create_text(cx + 15, cy,
+                                    text=coord_text,
+                                    fill=color,
+                                    font=('Arial', 8),
+                                    anchor=tk.W)
+
+    def _draw_correspondence_lines(self, source_triangle, dest_triangle):
+        """
+        Draw lines showing correspondence between source and destination vertices
+        """
+        # Draw thin lines connecting corresponding vertices
+        for i in range(3):
+            # Convert to canvas coordinates
+            src_x, src_y = self.machine_to_canvas(source_triangle[i][0], source_triangle[i][1])
+            dst_x, dst_y = self.machine_to_canvas(dest_triangle[i][0], dest_triangle[i][1])
+
+            # Draw correspondence line
+            self.canvas.create_line(src_x, src_y, dst_x, dst_y,
+                                    fill='#ffff00',  # Yellow
+                                    width=1,
+                                    dash=(5, 10))
+
+            # Add arrow at destination end
+            self._draw_arrow(src_x, src_y, dst_x, dst_y, color='#ffff00')
+
+    def _draw_arrow(self, x1, y1, x2, y2, color='#ffff00', size=10):
+        """Draw an arrow from (x1,y1) to (x2,y2)"""
+        import math
+
+        # Calculate angle
+        angle = math.atan2(y2 - y1, x2 - x1)
+
+        # Calculate arrow head points
+        arrow_angle1 = angle + math.pi * 0.8
+        arrow_angle2 = angle - math.pi * 0.8
+
+        arrow_x1 = x2 + size * math.cos(arrow_angle1)
+        arrow_y1 = y2 + size * math.sin(arrow_angle1)
+        arrow_x2 = x2 + size * math.cos(arrow_angle2)
+        arrow_y2 = y2 + size * math.sin(arrow_angle2)
+
+        # Draw arrow head
+        self.canvas.create_polygon(x2, y2, arrow_x1, arrow_y1, arrow_x2, arrow_y2,
+                                   fill=color, outline=color)
+
+    def draw_transformation_error_vectors(self, expected_points, actual_points):
+        """
+        Draw error vectors showing the difference between expected and actual positions
+
+        Args:
+            expected_points: List of expected positions after transformation
+            actual_points: List of actual positions after transformation
+        """
+        if not expected_points or not actual_points:
+            return
+
+        if len(expected_points) != len(actual_points):
+            return
+
+        for i, (expected, actual) in enumerate(zip(expected_points, actual_points)):
+            # Convert to canvas coordinates
+            ex, ey = self.machine_to_canvas(expected[0], expected[1])
+            ax, ay = self.machine_to_canvas(actual[0], actual[1])
+
+            # Draw error vector
+            self.canvas.create_line(ex, ey, ax, ay,
+                                    fill='#ff0000',  # Red for error
+                                    width=2,
+                                    arrow=tk.LAST)
+
+            # Calculate error magnitude
+            error_mm = np.sqrt((expected[0] - actual[0]) ** 2 + (expected[1] - actual[1]) ** 2)
+
+            # Draw error magnitude label
+            mid_x = (ex + ax) / 2
+            mid_y = (ey + ay) / 2
+            self.canvas.create_text(mid_x, mid_y - 5,
+                                    text=f"{error_mm:.2f}mm",
+                                    fill='#ff0000',
+                                    font=('Arial', 8))
