@@ -1,12 +1,13 @@
 """
 EventBroker - Enhanced with class decorator for automatic injection
 Eliminates the need to manually pass event_broker instances around
+UPDATED: event_handler decorator now supports arrays of events
 """
 
 import threading
 from enum import Enum, auto
 from functools import wraps
-from typing import Callable, Dict, List, Any, Optional, Type
+from typing import Callable, Dict, List, Any, Optional, Type, Union
 
 
 class EventPriority(Enum):
@@ -249,15 +250,17 @@ def event_aware(broker_name: str = "default"):
             return self._event_broker.has_subscribers(event_type)
 
         def _auto_register_handlers(self):
-            """Find and register all decorated event handler methods"""
+            """Find and register all decorated event handler methods - UPDATED to support multiple events"""
             for attr_name in dir(self):
                 attr = getattr(self, attr_name)
-                if callable(attr) and hasattr(attr, '_event_type'):
-                    self.listen(
-                        attr._event_type,
-                        attr,
-                        attr._event_priority
-                    )
+                if callable(attr) and hasattr(attr, '_event_types'):
+                    # UPDATED: Handle multiple events per handler
+                    for event_type in attr._event_types:
+                        self.listen(
+                            event_type,
+                            attr,
+                            attr._event_priority
+                        )
 
         # Add methods to class
         cls.emit = emit
@@ -272,15 +275,34 @@ def event_aware(broker_name: str = "default"):
     return decorator
 
 
-def event_handler(event_type: str, priority: EventPriority = EventPriority.NORMAL):
+def event_handler(event_types: Union[str, List[str]], priority: EventPriority = EventPriority.NORMAL):
     """
     Decorator for automatically registering event handlers
-    Usage: @event_handler('camera.connected')
+    UPDATED: Now supports single event or array of events
+
+    Usage:
+        @event_handler('camera.connected')
+        def handle_single_event(self, data): pass
+
+        @event_handler(['registration.computed', 'registration.loaded'])
+        def handle_multiple_events(self, data): pass
     """
 
     def decorator(func):
-        func._event_type = event_type
+        # UPDATED: Normalize to list and store as _event_types (plural)
+        if isinstance(event_types, str):
+            func._event_types = [event_types]
+        elif isinstance(event_types, list):
+            func._event_types = event_types
+        else:
+            # Handle other types (e.g., enums) by converting to string
+            func._event_types = [str(event_types)]
+
         func._event_priority = priority
+
+        # Keep backward compatibility: set _event_type to first event
+        func._event_type = func._event_types[0]
+
         return func
 
     return decorator

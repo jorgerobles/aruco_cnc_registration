@@ -186,7 +186,7 @@ class RouteTransformationPanel:
         self._update_ui_state()
 
     # Event Handlers for Registration Manager
-    @event_handler(RegistrationEvents.COMPUTED, EventPriority.HIGH)
+    @event_handler([RegistrationEvents.COMPUTED, RegistrationEvents.LOADED], EventPriority.HIGH)
     def _on_registration_computed(self, data: dict):
         """Handle registration computed event"""
         self.registration_available = True
@@ -198,6 +198,8 @@ class RouteTransformationPanel:
 
         self.log(f"Registration computed: {point_count} points, error: {error:.3f}mm")
         self._update_ui_state()
+
+
 
     @event_handler(RegistrationEvents.CLEARED, EventPriority.HIGH)
     def _on_registration_cleared(self, data: dict):
