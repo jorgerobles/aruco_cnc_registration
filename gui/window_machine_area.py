@@ -932,9 +932,7 @@ class MachineAreaWindow:
             # Draw the triangles
             if source_triangle or dest_triangle:
                 self.canvas_component.draw_transformation_triangles(source_triangle, dest_triangle)
-                self.log("Triangle debug visualization enabled")
-            else:
-                self.log("No triangles available for debug visualization", "warning")
+
 
         except Exception as e:
             self.log(f"Error enabling triangle debug mode: {e}", "error")
