@@ -19,6 +19,7 @@ from services.event_broker import event_aware, event_handler, EventPriority
 from services.grbl_controller import GRBLEvents
 from services.hardware_service import HardwareEvents
 from services.registration_manager import RegistrationEvents
+from services.route_transformation_service import RouteTransformationService
 
 
 @event_aware()
@@ -33,6 +34,7 @@ class MachineAreaWindow:
         self.routes_service = routes_service
         self.camera_manager = camera_manager
         self.hardware_service = hardware_service
+        self.route_transformation_service = RouteTransformationService(self.routes_service, self.registration_manager)
         self.logger = logger
 
         # Window state
@@ -924,10 +926,10 @@ class MachineAreaWindow:
                 return
 
             # Get source triangle from route bounds
-            source_triangle = self._get_source_triangle_from_routes()
+            source_triangle =  self.route_transformation_service.get_source_triangle_from_routes()
 
             # Get destination triangle from calibration points
-            dest_triangle = self._get_destination_triangle_from_calibration()
+            dest_triangle = self.route_transformation_service.get_destination_triangle_from_calibration()
 
             # Draw the triangles
             if source_triangle or dest_triangle:
@@ -937,113 +939,7 @@ class MachineAreaWindow:
         except Exception as e:
             self.log(f"Error enabling triangle debug mode: {e}", "error")
 
-    # Fixed _get_source_triangle_from_routes for MachineAreaWindow
 
-    def _get_source_triangle_from_routes(self):
-        """
-        Extract source triangle from route bounding box.
-        Uses the actual bounding box corners, not searching for nearest vertices.
-        FIXED: Now uses top-LEFT to match route transformer and destination triangle
-        """
-        try:
-            if not self.routes_service or not self.routes_service.is_loaded():
-                return None
-
-            routes = self.routes_service.get_routes()
-            if not routes:
-                return None
-
-            # Collect all points from all routes
-            all_points = []
-            for route in routes:
-                all_points.extend(route)
-
-            if not all_points:
-                return None
-
-            all_points = np.array(all_points)
-
-            # Calculate the actual bounding box
-            min_x = np.min(all_points[:, 0])
-            max_x = np.max(all_points[:, 0])
-            min_y = np.min(all_points[:, 1])
-            max_y = np.max(all_points[:, 1])
-
-            # Create triangle using actual bounding box corners
-            # FIXED: Use top-LEFT instead of top-RIGHT to match system convention
-            bottom_left = (min_x, min_y)  # Bottom-left corner
-            bottom_right = (max_x, min_y)  # Bottom-right corner
-            top_left = (min_x, max_y)  # Top-LEFT corner (FIXED: was max_x, now min_x)
-
-            # Return in consistent order: [bottom-left, bottom-right, top-left]
-            return [bottom_left, bottom_right, top_left]
-
-        except Exception as e:
-            self.log(f"Error getting source triangle: {e}", "error")
-            return None
-
-    def _get_destination_triangle_from_calibration(self):
-        """
-        Extract destination triangle from calibration points.
-        FIXED: Orders them to match the corrected source triangle pattern (bottom-left, bottom-right, top-left).
-        """
-        try:
-            if not self.calibration_points or len(self.calibration_points) < 3:
-                return None
-
-            # Get first 3 calibration points
-            points = np.array(self.calibration_points[:3])
-
-            # Sort points to identify their positions
-            # First separate by Y coordinate (bottom vs top)
-            y_sorted_indices = np.argsort(points[:, 1])
-
-            # If we have a clear top point (significantly higher Y)
-            y_values = points[:, 1]
-            y_range = np.max(y_values) - np.min(y_values)
-
-            if y_range > 10:  # Significant Y difference
-                # Identify bottom points (lower Y values)
-                bottom_mask = points[:, 1] < (np.min(y_values) + y_range * 0.5)
-                bottom_indices = np.where(bottom_mask)[0]
-                top_indices = np.where(~bottom_mask)[0]
-
-                if len(bottom_indices) >= 2 and len(top_indices) >= 1:
-                    # Get bottom points and sort by X
-                    bottom_points = points[bottom_indices]
-                    bottom_x_sorted = np.argsort(bottom_points[:, 0])
-
-                    bottom_left = bottom_points[bottom_x_sorted[0]]
-                    bottom_right = bottom_points[bottom_x_sorted[1]]
-
-                    # Get top point - should be the leftmost top point for consistency
-                    top_point = points[top_indices[0]]
-
-                    # FIXED: Return in order matching corrected source triangle
-                    # [bottom-left, bottom-right, top-left]
-                    return [tuple(bottom_left), tuple(bottom_right), tuple(top_point)]
-
-            # Fallback: use simple sorting
-            # Sort all points by Y, then by X
-            sorted_indices = np.lexsort((points[:, 0], points[:, 1]))
-            sorted_points = points[sorted_indices]
-
-            # Assume first two are bottom points
-            if sorted_points[0, 0] < sorted_points[1, 0]:
-                bottom_left = sorted_points[0]
-                bottom_right = sorted_points[1]
-            else:
-                bottom_left = sorted_points[1]
-                bottom_right = sorted_points[0]
-
-            top_point = sorted_points[2]
-
-            # FIXED: Return consistent order [bottom-left, bottom-right, top-left]
-            return [tuple(bottom_left), tuple(bottom_right), tuple(top_point)]
-
-        except Exception as e:
-            self.log(f"Error getting destination triangle: {e}", "error")
-            return None
 
     def toggle_triangle_debug(self):
         """Toggle triangle debug visualization on/off"""

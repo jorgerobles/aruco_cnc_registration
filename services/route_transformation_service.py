@@ -8,7 +8,9 @@ import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 
 from services.event_broker import event_aware
+from services.registration_manager import RegistrationManager
 from services.route_transformer import RouteTransformer
+from services.routes_manager import RouteManager
 
 
 class RouteTransformationEvents:
@@ -26,7 +28,9 @@ class RouteTransformationService:
     Bridges RouteTransformer and GUI components with proper event handling
     """
 
-    def __init__(self, logger=None):
+    def __init__(self, route_manager: RouteManager, registration_manager: RegistrationManager, logger=None):
+        self.registration_manager = registration_manager
+        self.route_manager = route_manager
         self.logger = logger
         self.log("Route Transformation Service initialized")
 
@@ -129,80 +133,7 @@ class RouteTransformationService:
 
 
 
-    def _get_registration_destination_points(self, registration_manager) -> Optional[List[Tuple[float, float]]]:
-        """
-        Extract 3 destination points from registration manager.
-        Reorder them to match the source triangle vertices order:
-        [0] -> bottom-left vertex (R7 position)
-        [1] -> bottom-right vertex (R8 position)
-        [2] -> top-left vertex (R6 position)
-        """
-        try:
-            if not registration_manager.is_registered():
-                raise ValueError("Registration not computed")
 
-            machine_positions = registration_manager.get_machine_positions()
-
-            if len(machine_positions) < 3:
-                raise ValueError("Need at least 3 calibration points")
-
-            # Get first 3 machine positions as numpy arrays for easier manipulation
-            cal_points = []
-            for i in range(3):
-                pos = machine_positions[i]
-                cal_points.append(np.array([float(pos[0]), float(pos[1])]))
-
-            cal_points = np.array(cal_points)
-
-            # Identify which calibration point corresponds to which position
-            # by analyzing their relative positions
-
-            # Sort by Y coordinate to separate bottom from top
-            y_sorted_indices = np.argsort(cal_points[:, 1])
-
-            # The two points with lowest Y are the bottom points
-            bottom_indices = y_sorted_indices[:2]
-            top_index = y_sorted_indices[2]
-
-            # Get the bottom points and sort by X to identify left vs right
-            bottom_points = cal_points[bottom_indices]
-            bottom_x_sorted = np.argsort(bottom_points[:, 0])
-
-            # Identify each point's role
-            bottom_left_idx = bottom_indices[bottom_x_sorted[0]]
-            bottom_right_idx = bottom_indices[bottom_x_sorted[1]]
-            top_left_idx = top_index  # The top point (assuming it's on the left as per R6)
-
-            # Check if the top point is actually on the left
-            # If not, we might need to adjust our assumption
-            top_point = cal_points[top_left_idx]
-            bottom_left_point = cal_points[bottom_left_idx]
-
-            # If top point's X is significantly to the right of bottom-left,
-            # we might have a different triangle orientation
-            if top_point[0] > bottom_left_point[0] + 10:  # 10mm tolerance
-                self.log("Warning: Top calibration point appears to be on the right, not left")
-
-            # Return points in the order matching the source triangle:
-            # [0] bottom-left, [1] bottom-right, [2] top-left
-            destination_points = [
-                (float(cal_points[bottom_left_idx][0]), float(cal_points[bottom_left_idx][1])),
-                (float(cal_points[bottom_right_idx][0]), float(cal_points[bottom_right_idx][1])),
-                (float(cal_points[top_left_idx][0]), float(cal_points[top_left_idx][1]))
-            ]
-
-            self.log(f"Reordered destination points to match source triangle:")
-            self.log(f"  Bottom-left (R7): {destination_points[0]}")
-            self.log(f"  Bottom-right (R8): {destination_points[1]}")
-            self.log(f"  Top-left (R6): {destination_points[2]}")
-
-            return destination_points
-
-        except Exception as e:
-            error_msg = f"Failed to get registration destination points: {e}"
-            self.log(error_msg, "error")
-            self.emit(RouteTransformationEvents.ERROR, error_msg)
-            return None
 
     def apply_registration_transformation(self, routes: List[List[Tuple[float, float]]],
                                           registration_manager) -> Optional[List[List[Tuple[float, float]]]]:
@@ -222,7 +153,7 @@ class RouteTransformationService:
                 return None
 
             # Get destination points from registration
-            destination_points = self._get_registration_destination_points(registration_manager)
+            destination_points = self.get_destination_triangle_from_calibration()
             if not destination_points:
                 return None
 
@@ -374,3 +305,109 @@ class RouteTransformationService:
             self.log(error_msg, "error")
             self.emit(RouteTransformationEvents.ERROR, error_msg)
             return {'error': error_msg}
+        
+    def get_source_triangle_from_routes(self):
+        """
+        Extract source triangle from route bounding box.
+        Uses the actual bounding box corners, not searching for nearest vertices.
+        FIXED: Now uses top-LEFT to match route transformer and destination triangle
+        """
+        try:
+            routes = self.route_manager.get_routes()
+           
+            all_points = []
+            for route in routes:
+                all_points.extend(route)
+
+            if not all_points:
+                return None
+
+            all_points = np.array(all_points)
+
+            # Calculate the actual bounding box
+            min_x = np.min(all_points[:, 0])
+            max_x = np.max(all_points[:, 0])
+            min_y = np.min(all_points[:, 1])
+            max_y = np.max(all_points[:, 1])
+
+            # Create triangle using actual bounding box corners
+            # FIXED: Use top-LEFT instead of top-RIGHT to match system convention
+            bottom_left = (min_x, min_y)  # Bottom-left corner
+            bottom_right = (max_x, min_y)  # Bottom-right corner
+            top_left = (min_x, max_y)  # Top-LEFT corner (FIXED: was max_x, now min_x)
+
+            # Return in consistent order: [bottom-left, bottom-right, top-left]
+            return [bottom_left, bottom_right, top_left]
+
+        except Exception as e:
+            self.log(f"Error getting source triangle: {e}", "error")
+            return None
+
+    def get_destination_triangle_from_calibration(self):
+        """
+        Extract destination triangle from calibration points.
+        FIXED: Orders them to match the corrected source triangle pattern (bottom-left, bottom-right, top-left).
+        """
+        calibration_points = [(pos[0], pos[1]) for pos in self.registration_manager.get_machine_positions()]
+        
+        try:
+            if not calibration_points or len(calibration_points) < 3:
+                return None
+
+            # Get first 3 calibration points
+            points = np.array(calibration_points[:3])
+
+            # Sort points to identify their positions
+            # First separate by Y coordinate (bottom vs top)
+            y_sorted_indices = np.argsort(points[:, 1])
+
+            # If we have a clear top point (significantly higher Y)
+            y_values = points[:, 1]
+            y_range = np.max(y_values) - np.min(y_values)
+
+            if y_range > 10:  # Significant Y difference
+                # Identify bottom points (lower Y values)
+                bottom_mask = points[:, 1] < (np.min(y_values) + y_range * 0.5)
+                bottom_indices = np.where(bottom_mask)[0]
+                top_indices = np.where(~bottom_mask)[0]
+
+                if len(bottom_indices) >= 2 and len(top_indices) >= 1:
+                    # Get bottom points and sort by X
+                    bottom_points = points[bottom_indices]
+                    bottom_x_sorted = np.argsort(bottom_points[:, 0])
+
+                    bottom_left = bottom_points[bottom_x_sorted[0]]
+                    bottom_right = bottom_points[bottom_x_sorted[1]]
+
+                    # Get top point - should be the leftmost top point for consistency
+                    top_point = points[top_indices[0]]
+
+                    # FIXED: Return in order matching corrected source triangle
+                    # [bottom-left, bottom-right, top-left]
+                    return [tuple(bottom_left), tuple(bottom_right), tuple(top_point)]
+
+            # Fallback: use simple sorting
+            # Sort all points by Y, then by X
+            sorted_indices = np.lexsort((points[:, 0], points[:, 1]))
+            sorted_points = points[sorted_indices]
+
+            # Assume first two are bottom points
+            if sorted_points[0, 0] < sorted_points[1, 0]:
+                bottom_left = sorted_points[0]
+                bottom_right = sorted_points[1]
+            else:
+                bottom_left = sorted_points[1]
+                bottom_right = sorted_points[0]
+
+            top_point = sorted_points[2]
+
+            # FIXED: Return consistent order [bottom-left, bottom-right, top-left]
+            return [tuple(bottom_left), tuple(bottom_right), tuple(top_point)]
+
+        except Exception as e:
+            self.log(f"Error getting destination triangle: {e}", "error")
+            return None
+        
+        
+        
+        

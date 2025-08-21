@@ -24,7 +24,7 @@ class RouteTransformationPanel:
     def __init__(self, parent, route_manager, registration_manager, logger: Optional[Callable] = None):
         self.route_manager = route_manager
         self.registration_manager = registration_manager
-        self.transformation_service = RouteTransformationService(logger)
+        self.transformation_service = RouteTransformationService(route_manager, registration_manager, logger)
         self.logger = logger
 
         # UI State
