@@ -12,7 +12,6 @@ from typing import List
 import numpy as np
 
 from gui.camera_display import CameraDisplay
-from gui.camera_display_store import CameraDisplayStore
 from gui.panel_camera import CameraPanel
 from gui.panel_commands import GRBLCommandPanel
 from gui.panel_debug import DebugPanel
@@ -42,7 +41,7 @@ Clean store integration without backward compatibility
 class RegistrationGUI:
     """Main GUI window with store integration"""
 
-    def __init__(self, root, grbl_controller, camera_manager, registration_manager, route_manager, hardware_service, store=None):
+    def __init__(self, root, grbl_controller, camera_manager, registration_manager, route_manager, hardware_service, store):
         self.machine_config_panel = None
         self.root = root
         self.root.title("GRBL Camera Registration with Store Integration")
@@ -399,15 +398,13 @@ class RegistrationGUI:
         )
 
     def setup_display_panel(self, parent):
-        """Setup camera display"""
-        self.camera_display = CameraDisplayStore(
-            parent,
-            self.store,
-            camera_manager=self.camera_manager,  # ← Pass camera manager
-            logger=self.log
+        """Setup camera display panel with overlays"""
+        # Create camera display without overlays
+        self.camera_display = CameraDisplay(
+            parent, self.camera_manager, logger=self.log
         )
 
-        # Add overlays
+        # Create and inject marker detection overlay
         self.marker_overlay = MarkerDetectionOverlay(
             self.camera_manager, marker_length=15.0, logger=self.log
         )

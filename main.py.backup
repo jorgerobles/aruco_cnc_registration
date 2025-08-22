@@ -1,0 +1,125 @@
+# main.py
+"""
+GRBL Camera Registration Application - Updated with Configuration System
+Main entry point for the application with YAML configuration support
+"""
+
+import tkinter as tk
+import os
+from pathlib import Path
+
+from gui.main_window import RegistrationGUI
+from gui.panel_configuration import ConfigurationPanel
+from services.camera_manager import CameraManager
+from services.grbl_controller import GRBLController
+from services.hardware_service import HardwareService, MachineOrigin
+from services.io.format_gcode import GCodeExporter
+from services.io.format_svg import SVGImporter, SVGExporter
+from services.io.manager import ImportExportManager
+from services.registration_manager import RegistrationManager
+from services.routes_manager import RouteManager
+from services.configuration_service import ConfigurationService
+from services.configuration_bridge import initialize_camera_panel_with_config
+from store import ApplicationStore
+
+
+def setup_default_directories():
+    """Create default directories if they don't exist"""
+    directories = [
+        "config",
+        "calibration",
+        "routes",
+        "registration"
+    ]
+
+    for directory in directories:
+        Path(directory).mkdir(exist_ok=True)
+
+
+def main():
+    """Main application entry point with store system"""
+    root = tk.Tk()
+
+    # Setup directories
+    setup_default_directories()
+
+    # ← Initialize store first (single source of truth)
+    store = ApplicationStore()
+
+    # Create services with store integration
+    # Note: Only CameraManager needs store, others can be updated later
+    camera_manager = CameraManager(store=store)  # ← Store injection
+
+    # Other services remain unchanged for now (following incremental refactoring)
+    grbl_controller = GRBLController()
+    hardware_service = HardwareService(
+        machine_size=(450, 450, 80),
+        camera_offset=(-45, 0, 0),
+        machine_origin=MachineOrigin.TOP_RIGHT,
+        homing_position=(-450, -450, 0)
+    )
+
+    # Configuration service (can be updated later to use store)
+    configuration_service = ConfigurationService(
+        hardware_service=hardware_service,
+        camera_manager=camera_manager,
+        logger=print
+    )
+
+    # Create main GUI with both event and store systems during transition
+    app = RegistrationGUI(
+        root=root,
+        camera_manager=camera_manager,
+        grbl_controller=grbl_controller,
+        hardware_service=hardware_service,
+        configuration_service=configuration_service,
+        store=store  # ← Pass store to GUI
+    )
+
+    # Load default configuration
+    default_config = "config/default_config.yaml"
+    if Path(default_config).exists():
+        configuration_service.load_and_apply_configuration(default_config)
+
+    root.mainloop()
+
+
+def load_config_dialog(configuration_service):
+    """Simple configuration load dialog"""
+    from tkinter import filedialog, messagebox
+
+    file_path = filedialog.askopenfilename(
+        title="Load Configuration",
+        filetypes=[("YAML files", "*.yaml *.yml"), ("All files", "*.*")],
+        initialdir="config"
+    )
+
+    if file_path:
+        success = configuration_service.load_and_apply_configuration(file_path)
+        if success:
+            messagebox.showinfo("Success", "Configuration loaded successfully")
+        else:
+            messagebox.showerror("Error", "Failed to load configuration")
+
+
+def save_config_dialog(configuration_service):
+    """Simple configuration save dialog"""
+    from tkinter import filedialog, messagebox
+
+    file_path = filedialog.asksaveasfilename(
+        title="Save Configuration",
+        defaultextension=".yaml",
+        filetypes=[("YAML files", "*.yaml"), ("All files", "*.*")],
+        initialdir="config"
+    )
+
+    if file_path:
+        success = configuration_service.save_current_configuration(file_path)
+        if success:
+            messagebox.showinfo("Success", "Configuration saved successfully")
+        else:
+            messagebox.showerror("Error", "Failed to save configuration")
+
+
+if __name__ == '__main__':
+    main()

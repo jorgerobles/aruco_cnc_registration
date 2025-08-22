@@ -1,4 +1,125 @@
-# services/camera_manager_fixed.py
+#!/usr/bin/env python3
+# camera_debug_fix.py
+"""
+Debug and fix camera connection issues
+Helps identify why camera disconnects immediately after connecting
+"""
+
+import cv2
+import numpy as np
+import time
+import threading
+from pathlib import Path
+
+
+def test_camera_basic(camera_id=0):
+    """Basic camera test to see what's happening"""
+    print(f"Testing camera {camera_id}...")
+
+    try:
+        # Test different backends
+        backends = [
+            ("Default", cv2.CAP_ANY),
+            ("DirectShow (Windows)", cv2.CAP_DSHOW),
+            ("V4L2 (Linux)", cv2.CAP_V4L2),
+        ]
+
+        for name, backend in backends:
+            print(f"\nTrying {name} backend:")
+            try:
+                cap = cv2.VideoCapture(camera_id, backend)
+                if cap.isOpened():
+                    print(f"  ✓ Camera opened with {name}")
+
+                    # Try to read a frame
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        h, w = frame.shape[:2]
+                        print(f"  ✓ Frame captured: {w}x{h}")
+
+                        # Try multiple frames
+                        for i in range(5):
+                            ret, frame = cap.read()
+                            if ret:
+                                print(f"  ✓ Frame {i + 1}: OK")
+                            else:
+                                print(f"  ❌ Frame {i + 1}: Failed")
+                                break
+                            time.sleep(0.1)
+                    else:
+                        print(f"  ❌ Could not read frame")
+
+                    cap.release()
+                    print(f"  ✓ Camera released")
+                    return True
+                else:
+                    print(f"  ❌ Could not open camera with {name}")
+            except Exception as e:
+                print(f"  ❌ Error with {name}: {e}")
+
+        return False
+
+    except Exception as e:
+        print(f"❌ Camera test failed: {e}")
+        return False
+
+
+def test_capture_thread_stability(camera_id=0):
+    """Test if capture thread works stably"""
+    print(f"\nTesting capture thread stability for camera {camera_id}...")
+
+    try:
+        cap = cv2.VideoCapture(camera_id)
+        if not cap.isOpened():
+            print("❌ Could not open camera")
+            return False
+
+        print("✓ Camera opened")
+
+        # Set properties
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        frame_count = 0
+        failed_count = 0
+        start_time = time.time()
+
+        print("Testing frame capture for 5 seconds...")
+
+        while time.time() - start_time < 5.0:
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                frame_count += 1
+                if frame_count % 30 == 0:  # Print every 30th frame
+                    print(f"  Captured {frame_count} frames...")
+            else:
+                failed_count += 1
+                if failed_count > 10:
+                    print(f"  ❌ Too many failed reads ({failed_count})")
+                    break
+
+            time.sleep(0.033)  # ~30 FPS
+
+        cap.release()
+
+        elapsed = time.time() - start_time
+        fps = frame_count / elapsed if elapsed > 0 else 0
+
+        print(f"✓ Captured {frame_count} frames in {elapsed:.1f}s ({fps:.1f} FPS)")
+        print(f"  Failed reads: {failed_count}")
+
+        return failed_count < frame_count * 0.1  # Less than 10% failure rate
+
+    except Exception as e:
+        print(f"❌ Capture thread test failed: {e}")
+        return False
+
+
+def create_fixed_camera_manager():
+    """Create a fixed version of the camera manager with better error handling"""
+
+    content = '''# services/camera_manager_fixed.py
 """
 Fixed Camera Manager with improved error handling and debugging
 """
@@ -135,136 +256,15 @@ class CameraManager:
             self._is_connected = False
             return False
 
-
-
-    def get_frame_sync(self) -> Optional[np.ndarray]:
-        """Get current frame synchronously"""
-        if not self.cap or not self._is_connected:
-            return None
-
-        try:
-            ret, frame = self.cap.read()
-            return frame if ret and frame is not None else None
-        except Exception as e:
-            print(f"[CameraManager] Sync frame error: {e}")
-            return None
-
-    def _start_capture_thread(self):
-        """Start capture thread with better error handling"""
-        if not self._enable_capture_thread:
-            return
-
-        if self._capture_thread and self._capture_thread.is_alive():
-            print("[CameraManager] Capture thread already running")
-            return
-
-        print("[CameraManager] Starting capture thread")
-        self._capture_running = True
-        self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
-        self._capture_thread.start()
-
-    # Fix for services/camera_manager.py - proper thread cleanup
-
-    def _stop_capture_thread(self):
-        """Stop capture thread with proper cleanup"""
-        if not self._capture_running:
-            return
-
-        print("[CameraManager] Stopping capture thread")
-        self._capture_running = False
-
-        if self._capture_thread and self._capture_thread.is_alive():
-            # Give thread a short time to stop gracefully
-            self._capture_thread.join(timeout=0.5)
-            if self._capture_thread.is_alive():
-                print("[CameraManager] Capture thread did not stop cleanly - forcing")
-                # Don't wait any longer, just continue
-            else:
-                print("[CameraManager] Capture thread stopped cleanly")
-
-        self._capture_thread = None
-
-    def _capture_loop(self):
-        """Fixed capture loop with proper exit handling"""
-        print("[CameraManager] Capture loop started")
-        consecutive_failures = 0
-        max_consecutive_failures = 10
-
-        while self._capture_running and self.is_connected:
-            try:
-                # Check if we should still be running
-                if not self._capture_running:
-                    break
-
-                if not self.cap or not self.cap.isOpened():
-                    print("[CameraManager] Camera not available in capture loop")
-                    break
-
-                ret, frame = self.cap.read()
-
-                if ret and frame is not None:
-                    # Reset failure counter
-                    consecutive_failures = 0
-                    self._frame_count += 1
-                    self._last_frame_time = time.time()
-
-                    # Only process if still running
-                    if self._capture_running:
-                        # Detect markers (simplified)
-                        marker_data = self._detect_markers_simple(frame)
-
-                        # Dispatch to store only if still running
-                        if self._capture_running:
-                            self.store.dispatch(CameraActions.frame_updated(frame.copy(), marker_data))
-
-                        # Log progress occasionally
-                        if self._frame_count % 100 == 0:
-                            print(f"[CameraManager] Captured {self._frame_count} frames")
-
-                    time.sleep(0.033)  # ~30fps
-
-                else:
-                    consecutive_failures += 1
-                    self._error_count += 1
-
-                    # Only log if still running (not shutting down)
-                    if self._capture_running:
-                        print(
-                            f"[CameraManager] Frame capture failed: {consecutive_failures}/{max_consecutive_failures}")
-
-                    if consecutive_failures >= max_consecutive_failures:
-                        print("[CameraManager] Too many consecutive failures, disconnecting")
-                        break
-
-                    time.sleep(0.1)  # Wait before retry
-
-            except Exception as e:
-                # Don't log errors during shutdown
-                if self._capture_running:
-                    print(f"[CameraManager] Capture loop error: {e}")
-                consecutive_failures += 1
-                if consecutive_failures >= max_consecutive_failures:
-                    break
-                time.sleep(0.1)
-
-        # Cleanup on exit
-        print("[CameraManager] Capture loop ending")
-        if self._is_connected:
-            print("[CameraManager] Capture loop ended, disconnecting")
-            self._is_connected = False
-            # Don't dispatch during shutdown if thread is stopping
-            if self._capture_running:
-                self.store.dispatch(CameraActions.connection_changed(False, self.camera_id))
-
     def disconnect(self) -> bool:
-        """Fixed disconnect with proper thread cleanup"""
+        """Disconnect with improved cleanup"""
         try:
             print("[CameraManager] Disconnecting...")
 
-            # Stop capture thread first - this is the key fix
+            # Stop capture thread first
             self._stop_capture_thread()
 
-            # Release camera after thread is stopped
+            # Release camera
             if self.cap:
                 self.cap.release()
                 self.cap = None
@@ -283,26 +283,92 @@ class CameraManager:
             print(f"[CameraManager] Disconnect error: {e}")
             return False
 
-    # Also add this property check
-    @property
-    def is_connected(self) -> bool:
-        """Check if camera is connected"""
-        # Don't access cap if we're shutting down
+    def _start_capture_thread(self):
+        """Start capture thread with better error handling"""
+        if not self._enable_capture_thread:
+            return
+
+        if self._capture_thread and self._capture_thread.is_alive():
+            print("[CameraManager] Capture thread already running")
+            return
+
+        print("[CameraManager] Starting capture thread")
+        self._capture_running = True
+        self._capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self._capture_thread.start()
+
+    def _stop_capture_thread(self):
+        """Stop capture thread with timeout"""
         if not self._capture_running:
-            return False
-        return self._is_connected and self.cap is not None and self.cap.isOpened()
+            return
 
+        print("[CameraManager] Stopping capture thread")
+        self._capture_running = False
 
+        if self._capture_thread and self._capture_thread.is_alive():
+            self._capture_thread.join(timeout=2.0)
+            if self._capture_thread.is_alive():
+                print("[CameraManager] Warning: Capture thread did not stop cleanly")
 
+    def _capture_loop(self):
+        """Improved capture loop with better error handling"""
+        print("[CameraManager] Capture loop started")
+        consecutive_failures = 0
+        max_consecutive_failures = 10
 
+        while self._capture_running and self.is_connected:
+            try:
+                if not self.cap or not self.cap.isOpened():
+                    print("[CameraManager] Camera not available in capture loop")
+                    break
 
+                ret, frame = self.cap.read()
 
+                if ret and frame is not None:
+                    # Reset failure counter
+                    consecutive_failures = 0
+                    self._frame_count += 1
+                    self._last_frame_time = time.time()
 
+                    # Detect markers (simplified)
+                    marker_data = self._detect_markers_simple(frame)
 
+                    # Dispatch to store
+                    self.store.dispatch(CameraActions.frame_updated(frame.copy(), marker_data))
 
+                    # Log progress occasionally
+                    if self._frame_count % 100 == 0:
+                        print(f"[CameraManager] Captured {self._frame_count} frames")
+
+                    time.sleep(0.033)  # ~30fps
+
+                else:
+                    consecutive_failures += 1
+                    self._error_count += 1
+
+                    print(f"[CameraManager] Frame capture failed: {consecutive_failures}/{max_consecutive_failures}")
+
+                    if consecutive_failures >= max_consecutive_failures:
+                        print("[CameraManager] Too many consecutive failures, disconnecting")
+                        break
+
+                    time.sleep(0.1)  # Wait before retry
+
+            except Exception as e:
+                print(f"[CameraManager] Capture loop error: {e}")
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    break
+                time.sleep(0.1)
+
+        # Cleanup on exit
+        if self._is_connected:
+            print("[CameraManager] Capture loop ended, disconnecting")
+            self._is_connected = False
+            self.store.dispatch(CameraActions.connection_changed(False, self.camera_id))
 
     def _detect_markers_simple(self, frame: np.ndarray) -> Optional[Dict]:
-        """Simplified marker detection - FIXED: Proper numpy array handling"""
+        """Simplified marker detection"""
         try:
             # Skip marker detection on most frames for performance
             if self._frame_count % 5 != 0:
@@ -310,23 +376,22 @@ class CameraManager:
 
             corners, ids, _ = cv2.aruco.detectMarkers(frame, self.aruco_dict, parameters=self.aruco_parameters)
 
-            # FIX: Safe boolean check and complete type conversion
-            if ids is not None and len(ids) > 0:
+            if ids is not None and len(corners) > 0:
                 return {
-                    'markers_detected': int(len(ids)),  # Ensure Python int
-                    'has_markers': True  # Simple boolean
+                    'markers_detected': len(ids),
+                    'marker_ids': ids.flatten().tolist(),
+                    'marker_corners': [corner.tolist() for corner in corners]
                 }
-            else:
-                return {
-                    'markers_detected': 0,
-                    'has_markers': False
-                }
+            return None
 
         except Exception as e:
             print(f"[CameraManager] Marker detection error: {e}")
             return None
 
-
+    @property
+    def is_connected(self) -> bool:
+        """Check if camera is connected"""
+        return self._is_connected and self.cap is not None and self.cap.isOpened()
 
     def load_calibration(self, calibration_file_path: str) -> bool:
         """Load calibration with error handling"""
@@ -377,6 +442,17 @@ class CameraManager:
             print(f"[CameraManager] Set resolution error: {e}")
             return False
 
+    def get_frame_sync(self) -> Optional[np.ndarray]:
+        """Get frame synchronously"""
+        if not self.cap or not self._is_connected:
+            return None
+
+        try:
+            ret, frame = self.cap.read()
+            return frame if ret else None
+        except Exception as e:
+            print(f"[CameraManager] Sync frame error: {e}")
+            return None
 
     def get_camera_info(self) -> Dict[str, Any]:
         """Get camera information"""
@@ -408,3 +484,64 @@ class CameraManager:
     def get_calibration(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         """Get calibration matrices"""
         return self.camera_matrix, self.dist_coeffs
+'''
+
+    # Write the fixed camera manager
+    with open("services/camera_manager_fixed.py", 'w', encoding='utf-8') as f:
+        f.write(content)
+
+    print("✓ Created fixed camera manager: services/camera_manager_fixed.py")
+
+
+def main():
+    """Run camera diagnosis and create fixes"""
+    print("Camera Debug and Fix Tool")
+    print("=" * 30)
+
+    # Test basic camera functionality
+    camera_works = test_camera_basic(0)
+
+    if camera_works:
+        print("\n✅ Basic camera test passed")
+
+        # Test capture thread stability
+        stable = test_capture_thread_stability(0)
+
+        if stable:
+            print("\n✅ Capture thread test passed")
+        else:
+            print("\n⚠️ Capture thread is unstable")
+    else:
+        print("\n❌ Basic camera test failed")
+
+    # Create fixed camera manager
+    print("\nCreating fixed camera manager...")
+    create_fixed_camera_manager()
+
+    print("\n" + "=" * 50)
+    print("RECOMMENDATIONS:")
+
+    if camera_works:
+        print("✓ Your camera hardware is working")
+        print("✓ The issue is likely in the capture thread or error handling")
+        print("\nTo fix:")
+        print("1. Replace services/camera_manager.py with services/camera_manager_fixed.py")
+        print("2. Or copy the improved error handling from the fixed version")
+        print("3. The fixed version has better debugging and error recovery")
+    else:
+        print("❌ Camera hardware issues detected")
+        print("\nTroubleshooting:")
+        print("1. Make sure camera is not used by another application")
+        print("2. Try different camera IDs (0, 1, 2, etc.)")
+        print("3. Check camera drivers")
+        print("4. Try different USB ports")
+
+    print("\nThe fixed camera manager includes:")
+    print("- Better error messages and debugging")
+    print("- Improved capture thread stability")
+    print("- Better handling of connection failures")
+    print("- Configurable error tolerance")
+
+
+if __name__ == '__main__':
+    main()

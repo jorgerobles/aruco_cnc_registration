@@ -56,20 +56,32 @@ class ConfigurationBridge:
             print(f"Error syncing component {type(component).__name__}: {e}")
 
 
-# Utility function to initialize camera panel with current configuration
-def initialize_camera_panel_with_config(camera_panel, configuration_service: ConfigurationService):
-    """
-    Utility function to initialize camera panel with current configuration
-    Call this after creating the camera panel to ensure it shows correct values
-    """
-    current_config = configuration_service.get_current_configuration()
-    if current_config:
-        camera_panel.update_from_configuration(current_config)
-        camera_panel.update_hardware_offset_from_configuration(current_config)
+# services/configuration_bridge.py
+"""
+Configuration Bridge - Utility functions for configuration integration
+Simple bridge functions for connecting configuration service with UI components
+"""
 
-        # Log the synchronization
-        if hasattr(camera_panel, 'log'):
-            camera_panel.log("Camera panel initialized with current configuration")
+
+def initialize_camera_panel_with_config(camera_panel, configuration_service):
+    """
+    Initialize camera panel with current configuration
+    Synchronizes UI with loaded configuration
+    """
+    try:
+        config = configuration_service.get_current_configuration()
+        if config and hasattr(camera_panel, 'update_from_configuration'):
+            camera_panel.update_from_configuration(config)
+
+            # Also update hardware offset if the method exists
+            if hasattr(camera_panel, 'update_hardware_offset_from_configuration'):
+                camera_panel.update_hardware_offset_from_configuration(config)
+
+            return True
+    except Exception as e:
+        print(f"Error initializing camera panel with config: {e}")
+
+    return False
 
 
 # Utility function for main application

@@ -3,14 +3,12 @@
 Pure reducer functions for state updates
 Each reducer handles a specific slice of state
 """
+import time
 
-from typing import Any
-from .state import (
-    ApplicationState, CameraState, MachineState, HardwareConfig,
-    RegistrationState, RoutesState, ConfigurationState,
-    UIState, SystemState, CalibrationPoint
-)
 from .actions import Action, ActionType
+from .state import (
+    ApplicationState, CameraState, MachineState, RegistrationState, RoutesState, UIState, CalibrationPoint
+)
 
 
 def camera_reducer(state: CameraState, action: Action) -> CameraState:
@@ -26,13 +24,20 @@ def camera_reducer(state: CameraState, action: Action) -> CameraState:
             fov_data=state.fov_data
         )
 
+
     elif action.type == ActionType.CAMERA_FRAME_UPDATED:
+        frame = action.payload['frame']
+        frame_info = {
+            'shape': frame.shape,
+            'timestamp': time.time(),
+            'has_frame': True
+        } if frame is not None else None
         return CameraState(
             connected=state.connected,
             camera_id=state.camera_id,
             resolution=state.resolution,
             calibration_file=state.calibration_file,
-            current_frame=action.payload['frame'],
+            current_frame=frame_info,  # ← Store metadata, not the array
             marker_detection=action.payload.get('marker_data'),
             fov_data=state.fov_data
         )
