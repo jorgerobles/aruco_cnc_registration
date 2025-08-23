@@ -292,11 +292,40 @@ class CameraManager:
             return False
         return self._is_connected and self.cap is not None and self.cap.isOpened()
 
+    def detect_marker_pose(self, frame: np.ndarray, marker_length_mm: float) -> Optional[Dict]:
+        """
+        Detect ArUco marker pose and calculate real-world coordinates
+        Returns marker data for FOV calculation
+        """
+        if not self.is_calibrated():
+            return None
 
+        try:
+            corners, ids, _ = cv2.aruco.detectMarkers(frame, self.aruco_dict, parameters=self.aruco_parameters)
 
+            if ids is not None and len(corners) > 0:
+                # Calculate pose for each marker
+                rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+                    corners, marker_length_mm, self.camera_matrix, self.dist_coeffs
+                )
 
+                marker_data = {
+                    'markers_detected': len(ids),
+                    'marker_ids': ids.flatten().tolist(),
+                    'marker_corners': [corner.tolist() for corner in corners],
+                    'poses': {
+                        'rvecs': rvecs.tolist(),
+                        'tvecs': tvecs.tolist()
+                    },
+                    'marker_length_mm': marker_length_mm
+                }
 
+                return marker_data
 
+            return None
+
+        except Exception as e:
+            return None
 
 
 
@@ -342,6 +371,19 @@ class CameraManager:
         except Exception as e:
             print(f"[CameraManager] Calibration load error: {e}")
             self.store.dispatch(CameraActions.calibration_loaded(False, calibration_file_path))
+            return False
+
+    def save_calibration(self, file_path: str) -> bool:
+        """Save current calibration data"""
+        if not self.is_calibrated():
+            return False
+
+        try:
+            np.savez(file_path,
+                     camera_matrix=self.camera_matrix,
+                     dist_coeffs=self.dist_coeffs)
+            return True
+        except Exception as e:
             return False
 
     def set_camera_id(self, camera_id: int) -> bool:
