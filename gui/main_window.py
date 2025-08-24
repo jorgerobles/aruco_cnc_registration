@@ -28,6 +28,7 @@ from services.grbl_controller import GRBLEvents
 from services.overlays.marker_detection_overlay import MarkerDetectionOverlay
 from services.registration_manager import RegistrationEvents
 from gui.panel_transform import RouteTransformationPanel
+from gui.panel_crosshair import CrosshairControlPanel
 
 
 @event_aware()
@@ -53,6 +54,7 @@ class RegistrationGUI:
         self.debug_panel = None
         self.machine_area_panel = None
         self.route_transformation_panel = None
+        self.crosshair_panel = None  # Crosshair control panel with auto-center
 
         # Machine area window (will be initialized later)
         self.machine_area_window = None
@@ -72,6 +74,9 @@ class RegistrationGUI:
 
         # Setup machine area window AFTER GUI is ready
         self.root.after(100, self.setup_machine_area_window)
+
+        # Start update timer for crosshair status
+        self.start_update_timer()
 
     def setup_event_logging(self):
         """Setup event logging to debug panel"""
@@ -93,7 +98,7 @@ class RegistrationGUI:
         if hasattr(self, 'debug_panel') and self.debug_panel:
             timestamp = time.strftime("%H:%M:%S")
             log_entry = f"[GUI] {message}"
-            self.debug_panel.log(log_entry, level)
+            self.debug_panel.log(log_entry, level)  # FIXED: correct method name
         else:
             print(f"[{level.upper()}] [GUI] {message}")
 
@@ -287,6 +292,10 @@ class RegistrationGUI:
         # CameraPanel handles all camera functionality
         self.calibration_panel = CameraPanel(scrollable_frame, self.camera_manager, self.hardware_service, self.log)
 
+        # Create crosshair control panel with auto-center
+        # Defer creation until marker overlay is ready in setup_display_panel
+        self.root.after(200, self._create_crosshair_panel_deferred, scrollable_frame)
+
         self.machine_panel = JogPanel(scrollable_frame, self.grbl_controller)
 
         self.registration_panel = RegistrationPanel(
@@ -317,27 +326,53 @@ class RegistrationGUI:
             self.log
         )
 
+    def _create_crosshair_panel_deferred(self, parent):
+        """Create enhanced crosshair panel with auto-center after marker overlay is ready"""
+        if hasattr(self, 'marker_overlay') and self.marker_overlay:
+            self.crosshair_panel = CrosshairControlPanel(
+                parent,
+                self.marker_overlay,
+                self.log,
+                self.grbl_controller,  # Pass GRBL controller for auto-center
+                self.registration_manager  # Pass registration manager for coordinate transform
+            )
+            self.log("Enhanced crosshair control panel with auto-center created")
+        else:
+            self.log("Marker overlay not ready for crosshair panel", "warning")
+
     def setup_display_panel(self, parent):
-        """Setup camera display panel with overlays - ORIGINAL CODE"""
-        # Create camera display - EXACT ORIGINAL
+        """Setup camera display panel with overlays - ENHANCED with crosshair"""
+        # Create camera display
         self.camera_display = CameraDisplay(
             parent, self.camera_manager, logger=self.log
         )
 
-        # Create and inject marker detection overlay - ORIGINAL
+        # Create ENHANCED marker detection overlay with crosshair functionality
         self.marker_overlay = MarkerDetectionOverlay(
             self.camera_manager, marker_length=15.0, logger=self.log
         )
-        self.camera_display.inject_overlay("markers", self.marker_overlay)
 
-        # Configure overlays - ORIGINAL
+        # Configure enhanced marker overlay settings
         self.marker_overlay.set_visibility(True)
+
+        # Enable crosshair functionality
+        if hasattr(self.marker_overlay, 'set_crosshair_visibility'):
+            self.marker_overlay.set_crosshair_visibility(True)
+
+        # Set pose callback for registration
+        if hasattr(self.marker_overlay, 'set_pose_callback'):
+            self.marker_overlay.set_pose_callback(self._on_marker_pose_detected)
+
+        # Inject marker overlay
+        self.camera_display.inject_overlay("markers", self.marker_overlay)
 
         # Create SVG routes panel now that overlays are ready
         control_parent = self.connection_panel.frame.master
         self.routes_panel = RoutesPanel(
             control_parent, self.route_manager, self.log
         )
+
+        self.log("Enhanced camera display with crosshair functionality initialized")
 
     def setup_debug_panel(self, parent):
         """Setup debug panel using the dedicated DebugPanel class"""
@@ -442,7 +477,7 @@ class RegistrationGUI:
         """Capture calibration point callback - ORIGINAL"""
         try:
             # Get current machine position
-            machine_pos = self.grbl_controller.get_position()
+            machine_pos = self.grbl_controller.get_position()  # FIXED: correct method name
             if machine_pos is None:
                 self.log("Cannot capture point: machine position not available", "error")
                 return
@@ -489,7 +524,7 @@ class RegistrationGUI:
 
             # Transform camera position to machine coordinates
             predicted_pos = self.registration_manager.transform_point(tvec)
-            actual_pos = self.grbl_controller.get_position()
+            actual_pos = self.grbl_controller.get_position()  # FIXED: correct method name
 
             if actual_pos is not None:
                 error = np.linalg.norm(predicted_pos - np.array(actual_pos)[:2])
@@ -533,6 +568,38 @@ class RegistrationGUI:
         except Exception as e:
             self.log(f"Error setting work offset: {e}", "error")
 
+    def _on_marker_pose_detected(self, rvec, tvec, norm_pos, marker_id):
+        """Enhanced marker pose detection handler - called by marker overlay"""
+        # This callback is used by the marker detection overlay
+        # The actual capture logic is handled in the capture_point method
+        pass
+
+    def start_update_timer(self):
+        """Start the periodic update timer for GUI updates"""
+        def update_gui():
+            try:
+                # Update crosshair status display
+                if hasattr(self, 'crosshair_panel') and self.crosshair_panel:
+                    self.crosshair_panel.update_status_display()
+
+            except Exception as e:
+                self.log(f"Error in GUI update: {e}", "error")
+
+            # Schedule next update
+            if hasattr(self, '_gui_running') and self._gui_running:
+                self.update_timer = self.root.after(500, update_gui)  # Update every 500ms
+
+        # Start the update loop
+        self._gui_running = True
+        self.update_timer = self.root.after(1000, update_gui)  # Initial delay
+
+    def stop_update_timer(self):
+        """Stop the periodic update timer"""
+        self._gui_running = False
+        if hasattr(self, 'update_timer') and self.update_timer:
+            self.root.after_cancel(self.update_timer)
+            self.update_timer = None
+
     def start_camera_feed(self):
         """Start camera feed after connection - ORIGINAL"""
         if self.camera_display and self.camera_manager.is_connected:
@@ -551,6 +618,9 @@ class RegistrationGUI:
     def on_closing(self):
         """Handle application closing"""
         try:
+            # Stop update timer
+            self.stop_update_timer()
+
             # Close machine area window
             if self.machine_area_window:
                 self.machine_area_window.close()

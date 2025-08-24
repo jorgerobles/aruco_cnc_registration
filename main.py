@@ -69,7 +69,7 @@ def main():
     format_manager.register_exporter(GCodeExporter())
 
     # Try to load default configuration
-    default_config_path = "config/default_cnc_config.yaml"
+    default_config_path = "config/default.yaml"
     config_loaded = False
 
     if os.path.exists(default_config_path):
