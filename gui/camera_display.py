@@ -227,9 +227,29 @@ class CameraDisplay:
         return result_frame
 
     def _process_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Process frame - basic processing only, overlays handle specific features"""
-        # Just return the frame as-is
-        # Any processing like marker detection is now handled by overlays
+        """Process frame - apply undistortion if camera is calibrated"""
+
+        # Check if camera is calibrated and undistortion is enabled
+        if self.camera_manager.is_calibrated() and self.camera_manager.is_undistortion_enabled():
+
+            try:
+                # Get calibration data
+                camera_matrix, dist_coeffs = self.camera_manager.get_calibration()
+
+                # Undistort the frame
+                undistorted_frame = cv2.undistort(
+                    frame,
+                    camera_matrix,
+                    dist_coeffs
+                )
+
+                return undistorted_frame
+
+            except Exception as e:
+                self.log(f"Error undistorting frame: {e}", "error")
+                return frame  # Return original frame if undistortion fails
+
+        # Return original frame if no calibration or undistortion disabled
         return frame
 
     def _display_frame(self, frame: np.ndarray):

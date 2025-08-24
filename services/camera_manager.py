@@ -39,7 +39,8 @@ class CameraEvents:
 class CameraManager:
     """Enhanced camera manager with integrated ArUco-based FOV calculation"""
 
-    def __init__(self, camera_id=0, resolution=(640, 480)):
+    def __init__(self, camera_id=0, resolution=(640, 480), enable_undistortion=True):
+        self.enable_undistortion = enable_undistortion
         self.camera_id = camera_id
         self.cap = None
         self.camera_matrix = None
@@ -474,3 +475,6 @@ class CameraManager:
             error_msg = f"Failed to save calibration: {e}"
             self.emit(CameraEvents.ERROR, error_msg)
             return False
+
+    def is_undistortion_enabled(self) -> bool:
+        return self.is_calibrated() and self.enable_undistortion
