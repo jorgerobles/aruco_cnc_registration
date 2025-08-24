@@ -1,6 +1,7 @@
 """
-Marker Detection Overlay
+Enhanced Marker Detection Overlay with Crosshair
 Handles ArUco marker detection and pose estimation as an overlay component
+Added crosshair functionality to help center markers with camera
 """
 
 from typing import Optional, Callable, Tuple
@@ -12,7 +13,7 @@ from services.overlays.overlay_interface import FrameOverlay
 
 
 class MarkerDetectionOverlay(FrameOverlay):
-    """Overlay component for ArUco marker detection and pose visualization"""
+    """Overlay component for ArUco marker detection and pose visualization with crosshair"""
 
     def __init__(self, camera_manager, marker_length: float = 15.0,
                  dictionary=cv2.aruco.DICT_4X4_50, logger: Optional[Callable] = None):
@@ -29,7 +30,15 @@ class MarkerDetectionOverlay(FrameOverlay):
         self.show_axes = True
         self.show_markers = True
         self.show_pose_info = True
+        self.show_crosshair = True  # NEW: Crosshair visibility toggle
         self.axes_length_factor = 0.5  # Axes length as factor of marker length
+
+        # Crosshair settings
+        self.crosshair_size = 20  # Half-length of crosshair lines
+        self.crosshair_thickness = 2
+        self.crosshair_color = (0, 255, 255)  # Yellow color (BGR)
+        self.crosshair_center_dot_size = 3
+        self.crosshair_center_dot_color = (0, 0, 255)  # Red color (BGR)
 
         # Detection state
         self.last_detection = {
@@ -73,6 +82,20 @@ class MarkerDetectionOverlay(FrameOverlay):
         """Toggle pose information text display"""
         self.show_pose_info = show_info
 
+    def set_crosshair_visibility(self, show_crosshair: bool):
+        """Toggle crosshair display"""
+        self.show_crosshair = show_crosshair
+        self.log(f"Crosshair visibility set to: {show_crosshair}")
+
+    def set_crosshair_size(self, size: int):
+        """Set crosshair line length (half-length from center)"""
+        self.crosshair_size = max(5, size)
+        self.log(f"Crosshair size set to: {self.crosshair_size}")
+
+    def set_crosshair_color(self, color: Tuple[int, int, int]):
+        """Set crosshair color (BGR format)"""
+        self.crosshair_color = color
+
     def set_axes_length_factor(self, factor: float):
         """Set axes length as factor of marker length"""
         self.axes_length_factor = max(0.1, factor)
@@ -90,21 +113,46 @@ class MarkerDetectionOverlay(FrameOverlay):
         if not self.visible:
             return frame
 
-        # Check if camera is calibrated
+        # Always draw crosshair first (even without calibration)
+        overlay_frame = frame.copy()
+        if self.show_crosshair:
+            self._draw_crosshair(overlay_frame)
+
+        # Check if camera is calibrated for marker detection
         if (self.camera_manager.camera_matrix is None or
                 self.camera_manager.dist_coeffs is None):
-            return self._draw_calibration_warning(frame)
+            return self._draw_calibration_warning(overlay_frame)
 
         try:
-            return self._detect_and_draw_markers(frame)
+            return self._detect_and_draw_markers(overlay_frame)
         except Exception as e:
             self.log(f"Error in marker detection overlay: {e}", "error")
-            return self._draw_error_message(frame, str(e))
+            return self._draw_error_message(overlay_frame, str(e))
+
+    def _draw_crosshair(self, frame: np.ndarray):
+        """Draw crosshair at frame center to help align markers"""
+        h, w = frame.shape[:2]
+        center_x, center_y = w // 2, h // 2
+
+        # Draw horizontal line
+        cv2.line(frame,
+                (center_x - self.crosshair_size, center_y),
+                (center_x + self.crosshair_size, center_y),
+                self.crosshair_color, self.crosshair_thickness)
+
+        # Draw vertical line
+        cv2.line(frame,
+                (center_x, center_y - self.crosshair_size),
+                (center_x, center_y + self.crosshair_size),
+                self.crosshair_color, self.crosshair_thickness)
+
+        # Draw center dot
+        cv2.circle(frame, (center_x, center_y),
+                  self.crosshair_center_dot_size,
+                  self.crosshair_center_dot_color, -1)
 
     def _detect_and_draw_markers(self, frame: np.ndarray) -> np.ndarray:
         """Detect markers and draw overlay information"""
-        overlay_frame = frame.copy()
-
         # Convert to grayscale for detection
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -149,80 +197,99 @@ class MarkerDetectionOverlay(FrameOverlay):
 
             # Draw marker outline
             if self.show_markers:
-                cv2.aruco.drawDetectedMarkers(overlay_frame, corners, ids)
+                cv2.aruco.drawDetectedMarkers(frame, corners, ids)
 
             # Draw coordinate axes
             if self.show_axes:
                 axes_length = self.marker_length * self.axes_length_factor
                 cv2.drawFrameAxes(
-                    overlay_frame,
+                    frame,
                     self.camera_manager.camera_matrix,
                     self.camera_manager.dist_coeffs,
                     rvec, tvec, axes_length)
 
             # Draw pose information
             if self.show_pose_info:
-                self._draw_pose_info(overlay_frame, rvec, tvec, norm_pos, marker_id)
+                self._draw_pose_info(frame, rvec, tvec, norm_pos, marker_id)
 
-            # Draw success status
-            cv2.putText(overlay_frame, "Marker detected", (10, 30),
+            # Draw success status with centering help
+            cv2.putText(frame, "Marker detected", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            # Show centering guidance
+            self._draw_centering_guidance(frame, center, (w//2, h//2))
+
         else:
             # No marker detected
             self._clear_detection_state()
-            cv2.putText(overlay_frame, "No marker detected", (10, 30),
+            cv2.putText(frame, "No marker detected", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.putText(frame, "Position marker at crosshair", (10, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-        return overlay_frame
+        return frame
+
+    def _draw_centering_guidance(self, frame: np.ndarray, marker_center: np.ndarray, frame_center: Tuple[int, int]):
+        """Draw guidance to help center the marker"""
+        marker_x, marker_y = int(marker_center[0]), int(marker_center[1])
+        center_x, center_y = frame_center
+
+        # Calculate offset
+        offset_x = marker_x - center_x
+        offset_y = marker_y - center_y
+        distance = np.sqrt(offset_x**2 + offset_y**2)
+
+        # Draw line from center to marker center
+        cv2.line(frame, (center_x, center_y), (marker_x, marker_y), (255, 255, 0), 2)
+
+        # Show centering status
+        if distance < 30:  # Well centered
+            status_text = "CENTERED"
+            status_color = (0, 255, 0)  # Green
+        elif distance < 80:  # Close to center
+            status_text = "CLOSE"
+            status_color = (0, 255, 255)  # Yellow
+        else:  # Needs adjustment
+            status_text = "ADJUST POSITION"
+            status_color = (0, 0, 255)  # Red
+
+        cv2.putText(frame, status_text, (10, 110),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+
+        # Show offset values
+        offset_text = f"Offset: ({offset_x:+.0f}, {offset_y:+.0f})"
+        cv2.putText(frame, offset_text, (10, 140),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
     def _draw_pose_info(self, frame: np.ndarray, rvec: np.ndarray, tvec: np.ndarray,
-                        norm_pos: Tuple[float, float], marker_id: int):
-        """Draw pose information text on frame"""
-        y_offset = 60
+                       norm_pos: Tuple[float, float], marker_id: int):
+        """Draw pose information on frame"""
+        # Position text
+        y_offset = 180
         line_height = 25
 
         # Marker ID
-        cv2.putText(frame, f"ID: {marker_id}", (10, y_offset),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+        cv2.putText(frame, f"Marker ID: {marker_id}", (10, y_offset),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         y_offset += line_height
 
-        # Translation vector
-        cv2.putText(frame, f"Pos: {tvec[0]:.1f}, {tvec[1]:.1f}, {tvec[2]:.1f}",
-                    (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-        y_offset += line_height
-
-        # Rotation vector (as Euler angles)
-        rotation_matrix, _ = cv2.Rodrigues(rvec)
-        euler_angles = self._rotation_matrix_to_euler(rotation_matrix)
-        cv2.putText(frame, f"Rot: {euler_angles[0]:.1f}°, {euler_angles[1]:.1f}°, {euler_angles[2]:.1f}°",
-                    (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        # Translation vector (position)
+        cv2.putText(frame, f"Position: ({tvec[0]:.1f}, {tvec[1]:.1f}, {tvec[2]:.1f})",
+                    (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
         y_offset += line_height
 
         # Normalized position
-        cv2.putText(frame, f"Norm: {norm_pos[0]:.3f}, {norm_pos[1]:.3f}",
-                    (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        cv2.putText(frame, f"Norm Pos: ({norm_pos[0]:.3f}, {norm_pos[1]:.3f})",
+                    (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        y_offset += line_height
 
-    def _rotation_matrix_to_euler(self, R: np.ndarray) -> Tuple[float, float, float]:
-        """Convert rotation matrix to Euler angles (in degrees)"""
-        # Extract Euler angles from rotation matrix
-        sy = np.sqrt(R[0, 0] * R[0, 0] + R[1, 0] * R[1, 0])
-
-        singular = sy < 1e-6
-
-        if not singular:
-            x = np.arctan2(R[2, 1], R[2, 2])
-            y = np.arctan2(-R[2, 0], sy)
-            z = np.arctan2(R[1, 0], R[0, 0])
-        else:
-            x = np.arctan2(-R[1, 2], R[1, 1])
-            y = np.arctan2(-R[2, 0], sy)
-            z = 0
-
-        # Convert to degrees
-        return (np.degrees(x), np.degrees(y), np.degrees(z))
+        # Distance from camera
+        distance = np.linalg.norm(tvec)
+        cv2.putText(frame, f"Distance: {distance:.1f}mm",
+                    (10, y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
     def _clear_detection_state(self):
-        """Clear the detection state when no marker is found"""
+        """Clear detection state when no marker is found"""
         self.last_detection.update({
             'rvec': None,
             'tvec': None,
@@ -233,21 +300,21 @@ class MarkerDetectionOverlay(FrameOverlay):
 
     def _draw_calibration_warning(self, frame: np.ndarray) -> np.ndarray:
         """Draw calibration warning on frame"""
-        overlay_frame = frame.copy()
-        cv2.putText(overlay_frame, "Camera not calibrated", (10, 30),
+        cv2.putText(frame, "Camera not calibrated", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-        cv2.putText(overlay_frame, "Load calibration to enable marker detection", (10, 60),
+        cv2.putText(frame, "Load calibration to enable marker detection", (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
-        return overlay_frame
+        cv2.putText(frame, "Crosshair shows camera center", (10, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 1)
+        return frame
 
     def _draw_error_message(self, frame: np.ndarray, error_msg: str) -> np.ndarray:
         """Draw error message on frame"""
-        overlay_frame = frame.copy()
-        cv2.putText(overlay_frame, "Marker detection error", (10, 30),
+        cv2.putText(frame, "Marker detection error", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        cv2.putText(overlay_frame, error_msg[:50], (10, 60),
+        cv2.putText(frame, error_msg[:50], (10, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-        return overlay_frame
+        return frame
 
     # Convenience methods for external access
     def get_current_pose(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[Tuple[float, float]]]:
@@ -269,3 +336,30 @@ class MarkerDetectionOverlay(FrameOverlay):
         if tvec is not None:
             return np.linalg.norm(tvec)
         return None
+
+    def get_centering_status(self) -> dict:
+        """Get marker centering status relative to crosshair"""
+        if not self.is_marker_detected():
+            return {'centered': False, 'distance': None, 'offset': None}
+
+        corners = self.last_detection['corners']
+        if corners is None:
+            return {'centered': False, 'distance': None, 'offset': None}
+
+        # Calculate marker center
+        marker_center = np.mean(corners[0], axis=0)
+
+        # Get frame dimensions (assuming standard camera resolution)
+        # In real usage, this should be passed or obtained from camera
+        frame_center = (320, 240)  # Default for 640x480
+
+        offset_x = marker_center[0] - frame_center[0]
+        offset_y = marker_center[1] - frame_center[1]
+        distance = np.sqrt(offset_x**2 + offset_y**2)
+
+        return {
+            'centered': distance < 30,
+            'distance': distance,
+            'offset': (offset_x, offset_y),
+            'status': 'CENTERED' if distance < 30 else ('CLOSE' if distance < 80 else 'ADJUST POSITION')
+        }
