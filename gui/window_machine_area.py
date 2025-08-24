@@ -965,3 +965,31 @@ class MachineAreaWindow:
 
         except Exception as e:
             self.log(f"Error toggling error vectors: {e}", "error")
+
+    # Add this method to the MachineAreaWindow class in gui/window_machine_area.py
+    # Place it after the hide_window() method, around line 180
+
+    def toggle_visibility(self, visible: bool = None):
+        """
+        Toggle machine area window visibility
+
+        Args:
+            visible: If provided, sets specific visibility state.
+                    If None, toggles current state.
+        """
+        if visible is None:
+            # Toggle current state
+            if self.is_visible:
+                self.hide_window()
+            else:
+                self.show_window()
+        else:
+            # Set specific state
+            if visible and not self.is_visible:
+                self.show_window()
+            elif not visible and self.is_visible:
+                self.hide_window()
+
+        self.log(f"Machine area window visibility: {'visible' if self.is_visible else 'hidden'}")
+
+    # The method should be added right after the hide_window() method in the MachineAreaWindow class
