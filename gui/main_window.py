@@ -142,6 +142,7 @@ class RegistrationGUI:
         """Handle GRBL connection event"""
         if success:
             self.log("GRBL connected successfully", "info")
+            self.log("Work position: "+self.grbl_controller.get_work_position())
             self.status_var.set("GRBL connected")
 
             # Get connection info for debugging

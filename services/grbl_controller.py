@@ -3,11 +3,12 @@ GRBL Controller - FIXED position reading issue
 The problem was in get_position() method doing redundant parsing
 Now it uses the already-parsed position from _parse_status()
 """
-
+import re
 import time
 from abc import ABC
 from concurrent.futures import Future
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Iterable, Callable
+from urllib import response
 
 import serial
 
@@ -19,6 +20,8 @@ class GRBLEvents:
     """GRBL event type constants"""
 
     # Connection events
+    WORK_OFFSETS_UPDATED = 'grbl.work_offsets_updated'
+    ASYNC_MESSAGE = 'grbl.async_message'
     CONNECTED = "grbl.connected"
     DISCONNECTED = "grbl.disconnected"
 
@@ -54,6 +57,11 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
         self._position_last_updated = 0
         self._position_valid = False
 
+        # Work offset tracking (NEW)
+        self.work_offsets = {}  # Stores G54-G59 offsets from $#
+        self.current_work_coordinate = "G54"  # Current active work coordinate from $G
+        self.work_position = [0.0, 0.0, 0.0]  # Current work position (machine pos - work offset)
+
         # Internal state
         self._grbl_detected = False
         self._initialization_complete = False
@@ -83,13 +91,17 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
 
             # Test communication
             if self._test_communication():
-                self._is_connected = True
-                self._grbl_detected = True
-                self._initialization_complete = True
+
+
+                # NEW: Query work offsets automatically
+                self._query_work_offsets()
 
                 # Get initial position - FIXED: Force position update
                 self._force_position_update()
 
+                self._is_connected = True
+                self._grbl_detected = True
+                self._initialization_complete = True
                 self.emit(GRBLEvents.CONNECTED, True)
                 self._log("✅ Connected successfully")
                 return True
@@ -147,19 +159,31 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
             self._log("✅ Disconnected")
 
     def get_position(self) -> List[float]:
-        """Get current machine position - FIXED implementation"""
         if not self.is_connected:
             raise Exception("GRBL not connected")
+        self._debounced_position()
+        #return self.current_position.copy();
+        return self.work_position.copy()
+
+    def get_work_position(self) -> List[float]:
+        """Get current work position coordinates as [X, Y, Z]"""
+        if not self.is_connected:
+            raise Exception("GRBL not connected")
+        self._debounced_position()
+        return self.work_position.copy()
+
+    def _debounced_position(self, timeout=2.0) -> List[float]:
 
         try:
             # Check if we have a recent valid position (within last 2 seconds)
             current_time = time.time()
             if (self._position_valid and
-                (current_time - self._position_last_updated) < 2.0):
+                (current_time - self._position_last_updated) < timeout):
                 return self.current_position.copy()
 
             # Need to update position
             self._force_position_update()
+            self._update_work_position()
 
             if self._position_valid:
                 return self.current_position.copy()
@@ -169,6 +193,7 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
         except Exception as e:
             self._log(f"❌ Position read failed: {e}")
             raise Exception(f"Failed to read machine position: {e}")
+
 
     def _force_position_update(self):
         """Force position update by sending status query with enhanced logging"""
@@ -407,6 +432,8 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
                 else:
                     self._log("⚠️ Position doesn't match target")
 
+                self._update_work_position()
+
                 # Emit position changed event
                 self.emit(GRBLEvents.POSITION_CHANGED, self.current_position.copy())
 
@@ -602,6 +629,7 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
             'initialization_complete': self._initialization_complete,
             'current_status': self.current_status,
             'current_position': self.current_position.copy(),
+            'work_position': self.work_position.copy(),
             'position_valid': self._position_valid,
             'position_last_updated': self._position_last_updated,
             'serial_port': self.serial_connection.port if self.serial_connection else None,
@@ -699,41 +727,101 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
         except Exception as e:
             self._log(f"Position update failed: {e}")
 
-    def _send_and_wait(self, command: str, timeout: float) -> List[str]:
-        """Send command and wait for responses"""
+    def _send_and_wait(
+            self,
+            command: str,
+            timeout: float,
+            *,
+            end_markers: Iterable[str] = ("ok", "error"),
+            grace: float = 0.1,
+            eol: bytes = b"\n",
+            chatter_filter: Optional[Callable[[str], bool]] = None,
+    ) -> List[str]:
+        """
+        Send a command and collect responses until timeout or a complete response.
+
+        chatter_filter(line) -> True means "this is chatter, not a response"
+        """
         if not self.serial_connection:
-            raise Exception("No serial connection")
+            raise RuntimeError("No serial connection")
 
+        port = self.serial_connection
+
+        # Clear stale bytes
         try:
-            # Send command
-            full_command = command + '\n'
-            self.serial_connection.write(full_command.encode())
+            port.reset_input_buffer()
+        except Exception:
+            while getattr(port, "in_waiting", 0):
+                port.read(port.in_waiting)
 
-            if self._log_command_flow:
-                self.emit(GRBLEvents.COMMAND_SENT, command)
+        if getattr(self, "_log_command_flow", False):
+            self.emit(GRBLEvents.COMMAND_SENT, command)
 
-            # Collect responses
-            responses = []
-            start_time = time.time()
+        # Send command
+        port.write(command.encode("ascii", "ignore") + eol)
 
-            while time.time() - start_time < timeout:
-                if self.serial_connection.in_waiting:
-                    line = self.serial_connection.readline().decode('utf-8', errors='ignore').strip()
-                    if line:
-                        responses.append(line)
-                        self._process_response(line)
+        responses: List[str] = []
+        buf = bytearray()
+        deadline = time.monotonic() + timeout
 
-                        # Check if command is complete
-                        if self._is_complete_response(command, line):
-                            break
-                else:
-                    time.sleep(0.01)
+        # Default chatter filter (GRBL-like status/alarm reports)
+        if chatter_filter is None:
+            def chatter_filter(line: str) -> bool:
+                return line.startswith("<") or line.startswith("ALARM:")
 
-            return responses
+        def flush_lines() -> bool:
+            """Move complete lines from buf -> responses. Return True if completion seen."""
+            nonlocal buf, responses
+            completed = False
+            while True:
+                try:
+                    i = buf.index(0x0A)  # '\n'
+                except ValueError:
+                    break
+                line = buf[:i + 1]
+                del buf[:i + 1]
+                text = line.decode("utf-8", "ignore").rstrip("\r\n")
+                if not text:
+                    continue
 
-        except Exception as e:
-            self._log(f"Send command error: {e}")
-            raise
+                if chatter_filter(text):
+                    self._parse_status(text)
+                    if hasattr(self, "emit"):
+                        self.emit(GRBLEvents.ASYNC_MESSAGE, text)
+                    else:
+                        self._log(f"Chatter: {text}")
+                    continue
+
+                responses.append(text)
+                if self._is_complete_response(command, text) or text in end_markers:
+                    completed = True
+            return completed
+
+        while time.monotonic() < deadline:
+            n = getattr(port, "in_waiting", 0)
+            if n:
+                chunk = port.read(n)
+                buf.extend(chunk)
+                if flush_lines():
+                    # Drain grace window
+                    end = time.monotonic() + grace
+                    while time.monotonic() < end:
+                        n2 = getattr(port, "in_waiting", 0)
+                        if not n2:
+                            time.sleep(0.002)
+                            continue
+                        buf.extend(port.read(n2))
+                        flush_lines()
+                    return responses
+            else:
+                time.sleep(0.002)
+
+        # Timeout: flush remaining
+        n = getattr(port, "in_waiting", 0)
+        if n:
+            buf.extend(port.read(n))
+        flush_lines()
+        return responses
 
     def _is_complete_response(self, command: str, response: str) -> bool:
         """Check if response completes the command"""
@@ -793,7 +881,6 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
                             self.current_position = coords[:3]
                             self._position_valid = True
                             self._position_last_updated = time.time()
-
                             self._log(f"✅ Position parsed: {self.current_position}")
 
                             # Check for significant position change
@@ -808,6 +895,9 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
 
         except Exception as e:
             self._log(f"❌ Status parse error: {e}")
+
+
+
 
     def _clear_startup_messages(self):
         """Clear GRBL startup messages"""
@@ -837,7 +927,7 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
 
         for command in test_commands:
             try:
-                responses = self._send_and_wait(command, 3.0)
+                responses = self._send_and_wait(command, 10.0)
 
                 for response in responses:
                     # Look for GRBL-specific responses
@@ -869,6 +959,11 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
     def _on_error(self, error_message: str):
         """Handle error events"""
         pass
+
+    @event_handler(GRBLEvents.ASYNC_MESSAGE)
+    def _on_async_message(self, response: str):
+        self._parse_status(response)
+        self._update_work_position()
 
     def debug_position_status(self):
         """Debug method to check current position status"""
@@ -910,3 +1005,94 @@ class GRBLController(IGRBLConnection, IGRBLStatus, IGRBLMovement, IGRBLCommunica
 
     def is_connected(self) -> bool:
         return self._is_connected
+
+    def refresh_work_offsets(self):
+        """Manually refresh work offset information"""
+        if self._is_connected:
+            self._query_work_offsets()
+        else:
+            self._log("❌ Cannot refresh work offsets - not connected")
+
+
+    def _query_work_offsets(self):
+        """Query GRBL work offsets ($#) and current work coordinate ($G) automatically"""
+
+
+
+        try:
+            self._log("🔍 Querying work offsets...")
+            # Query current work coordinate system ($G)
+            responses = self._send_and_wait("$G", 10.0)
+
+            if responses:
+                self._parse_current_work_coordinate(responses)
+            # Query work coordinate offsets ($#)
+            responses = self._send_and_wait("$#", 20.0)
+            if responses:
+                self._parse_work_offsets(responses)
+
+            # Calculate current work position
+            self._update_work_position()
+
+        except Exception as e:
+            print(e)
+
+
+
+    def _parse_work_offsets(self, responses: List[str]):
+        """Parse work coordinate offsets from $# command response"""
+        try:
+            self.work_offsets.clear()
+
+            for response in responses:
+                # Look for work coordinate lines like: [G54:0.000,0.000,0.000]
+                match = re.search(r'\[(G5[4-9]):([^\]]+)\]', response)
+                if match:
+                    coord_system = match.group(1)
+                    coords_str = match.group(2)
+
+                    # Parse coordinates
+                    coords = [float(x.strip()) for x in coords_str.split(',')]
+                    if len(coords) >= 3:
+                        self.work_offsets[coord_system] = coords[:3]  # X, Y, Z
+                        self._log(f"📍 {coord_system}: {coords[:3]}")
+
+            self._log(f"✅ Parsed {len(self.work_offsets)} work offsets")
+            self.emit(GRBLEvents.WORK_OFFSETS_UPDATED, self.work_offsets.copy())
+
+
+        except Exception as e:
+            self._log(f"❌ Work offset parsing failed: {e}")
+
+    def _parse_current_work_coordinate(self, responses: List[str]):
+        """Parse current work coordinate system from $G command response"""
+        try:
+            for response in responses:
+                # Look for active work coordinate like G54, G55, etc.
+                match = re.search(r'(G5[4-9])', response)
+                if match:
+                    self.current_work_coordinate = match.group(1)
+                    self._log(f"🎯 Current work coordinate: {self.current_work_coordinate}")
+
+                    break
+
+        except Exception as e:
+            self._log(f"❌ Current work coordinate parsing failed: {e}")
+
+    def _update_work_position(self):
+        """Update work position based on machine position and current work offset"""
+
+        if (self.current_work_coordinate in self.work_offsets and
+                self._position_valid):
+            work_offset = self.work_offsets[self.current_work_coordinate]
+
+            # Work position = Machine position - Work offset
+            self.work_position = [
+                self.current_position[0] - work_offset[0],
+                self.current_position[1] - work_offset[1],
+                self.current_position[2] - work_offset[2]
+            ]
+
+
+            self._log(f"🔧 Work position updated: {self.work_position}")
+

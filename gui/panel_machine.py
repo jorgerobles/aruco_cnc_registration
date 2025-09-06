@@ -54,6 +54,7 @@ class MachinePanel:
             self.grbl_disconnect_btn.config(state=tk.NORMAL)
             # Log at connection panel level (not duplicate of GRBL's internal logging)
             self.log("GRBL connected successfully", "info")
+            self.log(self.grbl_controller.get_work_position())
         else:
             self.grbl_status_var.set("Connection Failed")
             self.grbl_connect_btn.config(state=tk.NORMAL)
